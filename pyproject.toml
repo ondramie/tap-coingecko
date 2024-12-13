@@ -10,24 +10,46 @@ keywords = [
 license = "Apache 2.0"
 
 [tool.poetry.dependencies]
-python = "<3.11,>=3.7.1"
-requests = "^2.25.1"
-singer-sdk = "^0.4.5"
+python = ">=3.9"
+requests = "^2.32.3"
+singer-sdk = "^0.43.1"
+pendulum = "^3.0.0"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^6.2.5"
-tox = "^3.24.4"
+tox = "^4.23.2"
 flake8 = "^3.9.2"
-black = "^21.9b0"
+black = "^23.3.0"
 pydocstyle = "^6.1.1"
 mypy = "^0.910"
 types-requests = "^2.26.1"
 isort = "^5.10.1"
+pre-commit = "^4.0.1"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+src_paths = "tap_coingecko"
 
 [tool.isort]
 profile = "black"
 multi_line_output = 3 # Vertical Hanging Indent
 src_paths = "tap_coingecko"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false
+warn_unused_ignores = true
+warn_unused_configs = true
+dissallow_untyped_defs = true
+ignore_missing_imports = true
+ignore_errors = false
+
+[tool.mypy-test]
+ignore_errors = true
+
+[tools.pydocstyle]
+ignore = 104
 
 [build-system]
 requires = ["poetry-core>=1.0.8"]
