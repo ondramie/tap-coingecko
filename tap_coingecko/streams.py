@@ -3,7 +3,7 @@
 import copy
 import time
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Iterable, Optional, Union, cast
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Union, cast
 
 import backoff
 import pendulum
@@ -14,12 +14,14 @@ from singer_sdk.streams import RESTStream
 
 
 class CoingeckoStream(RESTStream):
-    """RESTStream for fetching daily historical CoinGecko token data
-    with incremental replication.
+    """RESTStream for fetching daily historical CoinGecko token data.
+
+    This class implements incremental replication for historical cryptocurrency
+    data from the CoinGecko API.
     """
 
     name = "coingecko_token"
-    primary_keys = ["date"]
+    primary_keys = ["date", "token"]
     replication_key = "date"
     replication_method = "INCREMENTAL"
     is_sorted = True
@@ -44,9 +46,11 @@ class CoingeckoStream(RESTStream):
         )(func)
         return decorator
 
-    def request_records(self, context: Optional[dict]) -> Iterable[dict]:
-        """Request and paginate through historical token data,
-        yielding records with rate limiting between requests.
+    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
+        """Request records from the CoinGecko API.
+
+        This method handles pagination through historical token data while
+        implementing rate limiting between requests.
         """
         next_page_token: Any = self.get_next_page_token(None, None, context)
         if not next_page_token:
@@ -86,7 +90,7 @@ class CoingeckoStream(RESTStream):
         self,
         response: Optional[requests.Response],
         previous_token: Optional[Any],
-        context: Optional[dict],
+        context: Optional[Mapping[str, Any]],
     ) -> Any:
         """Return the next date token for pagination, or None if we've reached the signpost date."""
         self.logger.debug(f"Getting next page token with previous_token={previous_token}")
@@ -115,7 +119,7 @@ class CoingeckoStream(RESTStream):
 
     def get_url_params(
         self,
-        context: Optional[dict],
+        context: Optional[Mapping[str, Any]],
         next_page_token: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Return a dictionary of values to be used in URL parameterization."""
@@ -126,11 +130,12 @@ class CoingeckoStream(RESTStream):
 
     def get_replication_key_signpost(
         self,
-        context: Optional[dict],
+        context: Optional[Mapping[str, Any]],
     ) -> Optional[Union[datetime, Any]]:
         """Return the signpost value for the replication key."""
         return cast(datetime, pendulum.yesterday(tz="UTC"))
 
+    # type: ignore[override]
     def parse_response(
         self, response: requests.Response, next_page_token: Optional[datetime]
     ) -> Iterable[dict]:
@@ -140,23 +145,44 @@ class CoingeckoStream(RESTStream):
         resp_json["date"] = next_page_token
         yield resp_json  # Only one row per query
 
-    def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
+    def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
         """Process row data after retrieval."""
+        process_row = {
+            "date": row["date"].strftime("%Y-%m-%d"),
+            "token": self.config["token"],
+            "symbol": row["symbol"],
+            "name": row["name"],
+        }
+
         market_data = row.get("market_data")
 
         if market_data:
-            row["price_usd"] = market_data.get("current_price").get("usd")
-            row["market_cap_usd"] = market_data.get("market_cap").get("usd")
-            row["total_volume_usd"] = market_data.get("total_volume").get("usd")
+            current_price = market_data.get("current_price")
+            process_row.update(
+                {
+                    "price_usd": current_price.get("usd"),
+                    "price_btc": current_price.get("btc"),
+                    "price_eth": current_price.get("eth"),
+                    "market_cap_usd": market_data.get("market_cap").get("usd"),
+                    "total_volume_usd": market_data.get("total_volume").get("usd"),
+                }
+            )
 
-        row["date"] = row["date"].strftime("%Y-%m-%d")
-        return row
+        return process_row
 
     schema = th.PropertiesList(
+        # Identifiers
         th.Property("date", th.StringType, required=True),
+        th.Property("token", th.StringType, required=True),
+        th.Property("symbol", th.StringType),
+        th.Property("name", th.StringType),
+        # Price Data
         th.Property("price_usd", th.NumberType),
+        th.Property("price_btc", th.NumberType),
+        th.Property("price_eth", th.NumberType),
         th.Property("market_cap_usd", th.NumberType),
         th.Property("total_volume_usd", th.NumberType),
+        # Community metrics
         th.Property(
             "community_data",
             th.ObjectType(
