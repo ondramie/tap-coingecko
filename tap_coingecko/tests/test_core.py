@@ -15,7 +15,7 @@ DAY_BEFORE_YESTERDAY = (
 ).strftime("%Y-%m-%d")
 
 SAMPLE_CONFIG = {
-    "token": "ethereum",
+    "token": ["ethereum"],
     "api_url": "https://api.coingecko.com/api/v3",
     "start_date": DAY_BEFORE_YESTERDAY,
     "wait_time_between_requests": 1,
