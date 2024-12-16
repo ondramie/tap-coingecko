@@ -20,6 +20,18 @@ class CoingeckoStream(RESTStream):
     data from the CoinGecko API.
     """
 
+    def __init__(self, tap=None, name=None, config=None):
+        """Initialize the stream.
+
+        Args:
+            tap: Singer Tap this stream belongs to
+            name: Stream name, if different from class name
+            config: Stream configuration dictionary
+        """
+        name = name or f"coingecko_{config['token']}" if config else "coingecko_token"
+        super().__init__(tap=tap, name=name)
+        self._config = config or tap.config
+
     name = "coingecko_token"
     primary_keys = ["date", "token"]
     replication_key = "date"
