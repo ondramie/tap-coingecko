@@ -20,10 +20,10 @@ class TapCoingecko(Tap):
     config_jsonschema = th.PropertiesList(
         th.Property(
             "token",
-            th.StringType,
+            th.ArrayType(th.StringType),
             required=True,
             description="The name of the token to import the price history of",
-            default="ethereum",
+            default=["ethereum", "solana"],
         ),
         th.Property(
             "api_url",
@@ -31,6 +31,12 @@ class TapCoingecko(Tap):
             required=True,
             description="Coingecko's api url",
             default="https://api.coingecko.com/api/v3",
+        ),
+        th.Property(
+            "api_key",
+            th.StringType,
+            required=True,
+            description="Your CoinGecko API key",
         ),
         th.Property(
             "start_date",
@@ -50,4 +56,4 @@ class TapCoingecko(Tap):
 
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams."""
-        return [stream_class(tap=self) for stream_class in STREAM_TYPES]
+        return [CoingeckoStream(tap=self)]  # Just return a single stream instance

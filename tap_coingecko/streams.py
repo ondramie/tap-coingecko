@@ -12,6 +12,11 @@ from singer_sdk import typing as th  # JSON Schema typing helpers
 from singer_sdk.exceptions import RetriableAPIError
 from singer_sdk.streams import RESTStream
 
+API_HEADERS = {
+    "https://pro-api.coingecko.com/api/v3": "x-cg-pro-api-key",
+    "https://api.coingecko.com/api/v3": "x-cg-demo-api-key",
+}
+
 
 class CoingeckoStream(RESTStream):
     """RESTStream for fetching daily historical CoinGecko token data.
@@ -26,6 +31,13 @@ class CoingeckoStream(RESTStream):
     replication_method = "INCREMENTAL"
     is_sorted = True
 
+    def get_request_headers(self) -> dict:
+        """Return a dictionary of headers to include in the API request."""
+        header_key = API_HEADERS.get(self.config["api_url"])
+        if header_key and self.config.get("api_key"):
+            return {header_key: self.config["api_key"]}
+        return {}
+
     @property
     def url_base(self) -> str:
         """Return the API URL root, configurable via tap settings."""
@@ -34,7 +46,7 @@ class CoingeckoStream(RESTStream):
     @property
     def path(self) -> str:
         """Return the API endpoint path."""
-        return f"/coins/{self.config['token']}/history"
+        return f"/coins/{self.current_token}/history"
 
     def request_decorator(self, func: Callable) -> Callable:
         """Return a decorator that handles backoff for retryable errors."""
@@ -46,12 +58,13 @@ class CoingeckoStream(RESTStream):
         )(func)
         return decorator
 
-    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
-        """Request records from the CoinGecko API.
+    def request_token_data(
+        self, token: str, context: Optional[Mapping[str, Any]]
+    ) -> Iterable[dict]:
+        """Request historical data for a specific token."""
+        self.current_token = token
+        self.logger.info(f"Processing token: {token}")
 
-        This method handles pagination through historical token data while
-        implementing rate limiting between requests.
-        """
         next_page_token: Any = self.get_next_page_token(None, None, context)
         if not next_page_token:
             return
@@ -60,7 +73,10 @@ class CoingeckoStream(RESTStream):
 
         while True:
             prepared_request = self.prepare_request(context, next_page_token=next_page_token)
+            prepared_request.headers.update(self.get_request_headers())
+
             self.logger.debug(f"Prepared request URL: {prepared_request.url}")
+            self.logger.debug(f"Prepared request headers: {prepared_request.headers}")
 
             resp = decorated_request(prepared_request, context)
             self.logger.debug(f"API response: {resp.status_code}, {resp.text}")
@@ -84,7 +100,16 @@ class CoingeckoStream(RESTStream):
                 break
 
             wait_time = self.config["wait_time_between_requests"]
-            time.sleep(wait_time)  # Wait before next request
+            time.sleep(wait_time)
+
+    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
+        """Request records from the CoinGecko API.
+
+        This method handles pagination through historical token data while
+        implementing rate limiting between requests.
+        """
+        for token in self.config["token"]:
+            yield from self.request_token_data(token, context)
 
     def get_next_page_token(
         self,
@@ -149,7 +174,7 @@ class CoingeckoStream(RESTStream):
         """Process row data after retrieval."""
         process_row = {
             "date": row["date"].strftime("%Y-%m-%d"),
-            "token": self.config["token"],
+            "token": self.current_token,
             "symbol": row["symbol"],
             "name": row["name"],
         }
