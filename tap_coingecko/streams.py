@@ -20,18 +20,6 @@ class CoingeckoStream(RESTStream):
     data from the CoinGecko API.
     """
 
-    def __init__(self, tap=None, name=None, config=None):
-        """Initialize the stream.
-
-        Args:
-            tap: Singer Tap this stream belongs to
-            name: Stream name, if different from class name
-            config: Stream configuration dictionary
-        """
-        name = name or f"coingecko_{config['token']}" if config else "coingecko_token"
-        super().__init__(tap=tap, name=name)
-        self._config = config or tap.config
-
     name = "coingecko_token"
     primary_keys = ["date", "token"]
     replication_key = "date"
@@ -58,12 +46,13 @@ class CoingeckoStream(RESTStream):
         )(func)
         return decorator
 
-    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
-        """Request records from the CoinGecko API.
+    def request_token_data(
+        self, token: str, context: Optional[Mapping[str, Any]]
+    ) -> Iterable[dict]:
+        """Request historical data for a specific token."""
+        self.current_token = token
+        self.logger.info(f"Processing token: {token}")
 
-        This method handles pagination through historical token data while
-        implementing rate limiting between requests.
-        """
         next_page_token: Any = self.get_next_page_token(None, None, context)
         if not next_page_token:
             return
@@ -96,7 +85,16 @@ class CoingeckoStream(RESTStream):
                 break
 
             wait_time = self.config["wait_time_between_requests"]
-            time.sleep(wait_time)  # Wait before next request
+            time.sleep(wait_time)
+
+    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
+        """Request records from the CoinGecko API.
+
+        This method handles pagination through historical token data while
+        implementing rate limiting between requests.
+        """
+        for token in self.config["token"]:
+            yield from self.request_token_data(token, context)
 
     def get_next_page_token(
         self,

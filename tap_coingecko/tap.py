@@ -56,11 +56,4 @@ class TapCoingecko(Tap):
 
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams."""
-        streams = []
-        for token in self.config["token"]:
-            # Create a modified config for this stream
-            stream_config = dict(self.config)
-            stream_config["token"] = token
-            stream = CoingeckoStream(tap=self, config=stream_config)
-            streams.append(stream)
-        return streams
+        return [CoingeckoStream(tap=self)]  # Just return a single stream instance
