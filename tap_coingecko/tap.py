@@ -16,7 +16,6 @@ class TapCoingecko(Tap):
 
     name = "tap-coingecko"
 
-    # TODO: Update this section with the actual config values you expect:
     config_jsonschema = th.PropertiesList(
         th.Property(
             "token",

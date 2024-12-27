@@ -3,7 +3,7 @@
 import copy
 import time
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Union, cast
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, cast
 
 import backoff
 import pendulum
@@ -46,6 +46,8 @@ class CoingeckoStream(RESTStream):
     @property
     def path(self) -> str:
         """Return the API endpoint path."""
+        if not hasattr(self, "current_token"):
+            raise ValueError("No token has been set for the stream")
         return f"/coins/{self.current_token}/history"
 
     def request_decorator(self, func: Callable) -> Callable:
@@ -102,6 +104,42 @@ class CoingeckoStream(RESTStream):
             wait_time = self.config["wait_time_between_requests"]
             time.sleep(wait_time)
 
+    def get_starting_replication_key_value(
+        self, context: Optional[Mapping[str, Any]]
+    ) -> Optional[datetime]:
+        """Return the starting replication key value from state or config."""
+        current_state = self.get_context_state(context)
+        token_bookmark = current_state.get(self.current_token, {}).get(self.replication_key)
+
+        if token_bookmark:
+            self.logger.info(f"Resuming {self.current_token} sync from {token_bookmark}")
+            return cast(datetime, pendulum.parse(token_bookmark))
+
+        config_start_date = self.config["start_date"]
+        self.logger.info(f"Starting {self.current_token} sync from config date {config_start_date}")
+        return cast(datetime, pendulum.parse(config_start_date))
+
+    def get_updated_state(
+        self,
+        current_stream_state: dict,
+        latest_record: dict,
+    ) -> dict:
+        """Return updated state based on latest record."""
+        current_stream_state = current_stream_state or {}
+        current_token_state = current_stream_state.get(self.current_token, {})
+
+        # Get the latest bookmark for this token
+        latest_bookmark = current_token_state.get(self.replication_key)
+        record_value = latest_record["date"]
+
+        if isinstance(record_value, datetime):
+            record_value = record_value.strftime("%Y-%m-%d")
+
+        if latest_bookmark is None or record_value > latest_bookmark:
+            current_stream_state[self.current_token] = {self.replication_key: record_value}
+
+        return current_stream_state
+
     def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
         """Request records from the CoinGecko API.
 
@@ -122,7 +160,7 @@ class CoingeckoStream(RESTStream):
         old_token = (
             previous_token
             or self.get_starting_replication_key_value(context)
-            or self.config["coingecko_start_date"]
+            or self.config["start_date"]
         )
         self.logger.debug(f"old_token after resolution: {old_token}")
 
@@ -156,9 +194,9 @@ class CoingeckoStream(RESTStream):
     def get_replication_key_signpost(
         self,
         context: Optional[Mapping[str, Any]],
-    ) -> Optional[Union[datetime, Any]]:
+    ) -> datetime:
         """Return the signpost value for the replication key."""
-        return cast(datetime, pendulum.yesterday(tz="UTC"))
+        return pendulum.yesterday(tz="UTC")
 
     # type: ignore[override]
     def parse_response(
