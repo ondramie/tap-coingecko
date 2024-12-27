@@ -108,23 +108,21 @@ class CoingeckoStream(RESTStream):
         self, context: Optional[Mapping[str, Any]]
     ) -> Optional[datetime]:
         """Return the starting replication key value from state or config."""
-        if not hasattr(self, "current_token"):
-            raise ValueError("No token has been set for the stream")
-
         current_state = self.get_context_state(context)
 
-        # Get bookmark from state for this specific token
-        token_bookmark = (
-            current_state.get("bookmarks", {}).get(self.current_token, {}).get(self.replication_key)
+        bookmark = (
+            current_state.get("bookmarks", {})
+            .get("coingecko_token", {})
+            .get("replication_key_value")
         )
 
-        if token_bookmark:
-            self.logger.info(f"Resuming {self.current_token} sync from {token_bookmark}")
-            return cast(datetime, pendulum.parse(token_bookmark))
+        if bookmark:
+            self.logger.info(f"Resuming sync from {bookmark}")
+            return cast(datetime, pendulum.parse(bookmark))
 
         # Fall back to start_date from config
         config_start_date = self.config["start_date"]
-        self.logger.info(f"Starting {self.current_token} sync from config date {config_start_date}")
+        self.logger.info(f"Starting sync from config date {config_start_date}")
         return cast(datetime, pendulum.parse(config_start_date))
 
     def get_updated_state(
@@ -134,36 +132,28 @@ class CoingeckoStream(RESTStream):
     ) -> dict:
         """Return updated state based on latest record.
 
-        State structure will be:
+        State structure should match:
         {
             "bookmarks": {
-                "aave": {"date": "2024-12-26"},
-                "agoric": {"date": "2024-12-11"}
-            },
-            "currently_syncing": "agoric"  # Optional, useful for resuming
+                "coingecko_token": {
+                    "replication_key": "date",
+                    "replication_key_value": "2024-12-26"
+                }
+            }
         }
         """
         current_stream_state = current_stream_state or {"bookmarks": {}}
 
-        current_token = latest_record["token"]
-        token_bookmark = (
-            current_stream_state.get("bookmarks", {})
-            .get(current_token, {})
-            .get(self.replication_key)
-        )
         record_value = latest_record["date"]
-
         if isinstance(record_value, datetime):
             record_value = record_value.strftime("%Y-%m-%d")
 
-        if token_bookmark is None or record_value > token_bookmark:
-            if "bookmarks" not in current_stream_state:
-                current_stream_state["bookmarks"] = {}
-            if current_token not in current_stream_state["bookmarks"]:
-                current_stream_state["bookmarks"][current_token] = {}
-            current_stream_state["bookmarks"][current_token][self.replication_key] = record_value
-
-        current_stream_state["currently_syncing"] = current_token
+        current_stream_state["bookmarks"] = {
+            "coingecko_token": {
+                "replication_key": self.replication_key,
+                "replication_key_value": record_value,
+            }
+        }
 
         return current_stream_state
 
