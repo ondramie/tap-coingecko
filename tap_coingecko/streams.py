@@ -34,7 +34,7 @@ class CoingeckoStream(RESTStream):
     def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
         """Return request parameters for concurrent requests based on API type."""
         is_pro_api = self.config["api_url"] == "https://pro-api.coingecko.com/api/v3"
-        
+
         if is_pro_api:
             return {
                 "concurrency": 5,  # 5 concurrent requests
