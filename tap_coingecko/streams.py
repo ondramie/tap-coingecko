@@ -31,6 +31,18 @@ class CoingeckoStream(RESTStream):
     replication_method = "INCREMENTAL"
     is_sorted = True
 
+    def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
+        """Return request parameters for concurrent requests based on API type."""
+        is_pro_api = self.config["api_url"] == "https://pro-api.coingecko.com/api/v3"
+        
+        if is_pro_api:
+            return {
+                "concurrency": 5,  # 5 concurrent requests
+                "max_rate_limit": 10,  # 10 requests per second
+                "rate_limit_window_size": 1.0,  # Window size in seconds
+            }
+        return None  # Use default non-concurrent behavior
+
     def get_request_headers(self) -> dict:
         """Return a dictionary of headers to include in the API request."""
         header_key = API_HEADERS.get(self.config["api_url"])
@@ -72,6 +84,7 @@ class CoingeckoStream(RESTStream):
             return
 
         decorated_request = self.request_decorator(self._request)
+        is_pro_api = self.config["api_url"] == "https://pro-api.coingecko.com/api/v3"
 
         while True:
             prepared_request = self.prepare_request(context, next_page_token=next_page_token)
@@ -101,8 +114,10 @@ class CoingeckoStream(RESTStream):
             if not next_page_token:
                 break
 
-            wait_time = self.config["wait_time_between_requests"]
-            time.sleep(wait_time)
+            # Only sleep if using free API
+            if not is_pro_api:
+                wait_time = self.config["wait_time_between_requests"]
+                time.sleep(wait_time)
 
     def get_starting_replication_key_value(
         self, context: Optional[Mapping[str, Any]]
