@@ -29,7 +29,7 @@ class CoingeckoStream(RESTStream):
     primary_keys = ["date", "token"]
     replication_key = "date"
     replication_method = "INCREMENTAL"
-    is_sorted = False
+    is_sorted = True
 
     def get_request_headers(self) -> dict:
         """Return a dictionary of headers to include in the API request."""
