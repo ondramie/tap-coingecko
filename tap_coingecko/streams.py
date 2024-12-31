@@ -29,7 +29,7 @@ class CoingeckoStream(RESTStream):
     primary_keys = ["date", "token"]
     replication_key = "date"
     replication_method = "INCREMENTAL"
-    is_sorted = True
+    is_sorted = False
 
     def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
         """Return request parameters for concurrent requests based on API type."""
