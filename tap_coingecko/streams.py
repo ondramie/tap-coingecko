@@ -33,6 +33,7 @@ class CoingeckoStream(RESTStream):
     primary_keys = ["date", "token"]
     replication_key = "date"
     replication_method = "INCREMENTAL"
+    is_sorted = False
     state_partitioning_keys = ["token"]
 
     def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
@@ -146,7 +147,9 @@ class CoingeckoStream(RESTStream):
             Parsed response records for the given token.
 
         """
+        self.logger.info(f"Fetching token for context: {self.context}")
         next_page_token = self.get_next_page_token(None, None, context)
+        self.logger.info(f"Fetching `next_page_token`: {next_page_token}")
         if not next_page_token:
             return
 
@@ -170,6 +173,8 @@ class CoingeckoStream(RESTStream):
     def get_starting_replication_key_value(self, context: Optional[Mapping[str, Any]]) -> datetime:
         """Return the starting replication key value from state or config."""
         current_state = self.get_context_state(context)
+
+        self.logger.info(f"current fucking state: {current_state}")
 
         # Retrieve the bookmark from the state
         bookmark = (
