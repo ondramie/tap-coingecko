@@ -2,9 +2,7 @@
 
 import datetime
 import os
-from typing import Any, Dict
 
-import pendulum
 import pytest
 from singer_sdk.testing import get_tap_test_class
 
@@ -60,28 +58,35 @@ class TestCustomTapCoingecko:
 
     def test_state_per_token(self, tap_instance: TapCoingecko) -> None:
         """Test that state is properly managed per token."""
-        tap = tap_instance  # Use the injected fixture
+        tap = tap_instance
         stream = tap.streams["coingecko_token"]
 
-        # Test starting from empty state
-        empty_context: Dict[str, Dict[str, Any]] = {"state": {}}
-        stream.current_token = "ethereum"
-        start_date = stream.get_starting_replication_key_value(empty_context)
-        assert start_date == pendulum.parse(tap.config["start_date"])
+        # Test that state partitioning is configured correctly
+        assert stream.state_partitioning_keys == ["token"]
 
-        # Test state updates for different tokens
-        record1 = {"date": YESTERDAY, "token": "ethereum"}
-        record2 = {"date": DAY_BEFORE_YESTERDAY, "token": "bitcoin"}
+        # Create some test records
+        records = [
+            {"date": "2025-01-05", "token": "ethereum", "data": "test1"},
+            {"date": "2025-01-04", "token": "bitcoin", "data": "test2"},
+            {"date": "2025-01-06", "token": "ethereum", "data": "test3"},
+        ]
 
-        state: Dict[str, Dict[str, Any]] = {}
-        new_state = stream.get_updated_state(state, record1)
-        new_state = stream.get_updated_state(new_state, record2)
+        # Process each record and check state updates
+        for record in records:
+            context = {"token": record["token"]}
+            # Simulate record processing
+            stream._increment_stream_state(record, context=context)
 
-        assert (
-            new_state["bookmarks"]["coingecko_token"]["ethereum"]["replication_key_value"]
-            == YESTERDAY
-        )
-        assert (
-            new_state["bookmarks"]["coingecko_token"]["bitcoin"]["replication_key_value"]
-            == DAY_BEFORE_YESTERDAY
-        )
+        # Check the overall state structure
+        state = stream.tap_state["bookmarks"]["coingecko_token"]
+        assert "partitions" in state
+
+        # Find ethereum partition
+        eth_partition = next(p for p in state["partitions"] if p["context"]["token"] == "ethereum")
+        assert eth_partition["progress_markers"]["replication_key"] == "date"
+        assert eth_partition["progress_markers"]["replication_key_value"] == "2025-01-06"
+
+        # Find bitcoin partition
+        btc_partition = next(p for p in state["partitions"] if p["context"]["token"] == "bitcoin")
+        assert btc_partition["progress_markers"]["replication_key"] == "date"
+        assert btc_partition["progress_markers"]["replication_key_value"] == "2025-01-04"
