@@ -36,6 +36,18 @@ class CoingeckoStream(RESTStream):
     is_sorted = False
     state_partitioning_keys = ["token"]
 
+    @property
+    def state_partitioning_key_values(self) -> dict[str, list[Any]]:
+        """Return a dictionary of partition key names and their possible values."""
+        return {"token": self.config["token"]}
+
+    def get_replication_key_signpost(
+        self,
+        context: Optional[Mapping[str, Any]],
+    ) -> datetime:
+        """Return the signpost value for the replication key (yesterday's date)."""
+        return pendulum.yesterday(tz="UTC")
+
     def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
         """Return request parameters for concurrent requests based on API type.
 
@@ -129,9 +141,13 @@ class CoingeckoStream(RESTStream):
             Individual token records.
 
         """
+        self.logger.info(f"Starting request_records with tokens: {self.config['token']}")
         for token in self.config["token"]:
-            self.current_token = token
-            yield from self._fetch_token_data(context)
+            self.logger.info(f"Processing token: {token}")
+            self.current_token, token_context = token, {"token": token}
+            records = list(self._fetch_token_data(token_context))
+            self.logger.info(f"Got {len(records)} records for token {token}")
+            yield from records
 
     def _fetch_token_data(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
         """Fetch historical data for a specific token.
@@ -158,15 +174,21 @@ class CoingeckoStream(RESTStream):
             prepared_request = self.prepare_request(context, next_page_token)
             prepared_request.headers.update(self.get_request_headers())
             response = decorated_request(prepared_request, context)
-            yield from self.parse_response(response, next_page_token)
+
+            for record in self.parse_response(response, next_page_token):
+                record_with_context = record if context is None else {**record, **context}
+                self._increment_stream_state(record_with_context, context=context)
+                yield record_with_context
 
             previous_token = copy.deepcopy(next_page_token)
             next_page_token = self.get_next_page_token(response, previous_token, context)
+
             if next_page_token == previous_token:
                 raise RuntimeError("Infinite pagination loop detected.")
 
             if not next_page_token:
                 break
+
             if self.config["api_url"] != "https://pro-api.coingecko.com/api/v3":
                 time.sleep(self.config["wait_time_between_requests"])
 
@@ -174,24 +196,24 @@ class CoingeckoStream(RESTStream):
         """Return the starting replication key value from state or config."""
         current_state = self.get_context_state(context)
 
-        self.logger.info(f"current fucking state: {current_state}")
+        # Get bookmark for current partition if it exists
+        bookmark = current_state.get("replication_key_value") if current_state else None
 
-        # Retrieve the bookmark from the state
-        bookmark = (
-            current_state.get("bookmarks", {})
-            .get("coingecko_token", {})
-            .get(self.current_token, {})
-            .get("replication_key_value")
-        )
-
-        if bookmark is not None:
-            self.logger.info(f"Resuming sync from {bookmark}")
+        if bookmark:
+            self.logger.info(f"Resuming sync for token {self.current_token} from {bookmark}")
             return cast(datetime, pendulum.parse(bookmark))
 
         # Fall back to start_date from config
         config_start_date = self.config["start_date"]
-        self.logger.info(f"Starting sync from config date {config_start_date}")
-        return pendulum.parse(config_start_date)
+        self.logger.info(
+            f"Starting sync for token {self.current_token} from config date {config_start_date}"
+        )
+        return cast(datetime, pendulum.parse(config_start_date))
+
+    def get_state_partitions(self, context: Optional[Mapping[str, Any]] = None) -> Iterable[dict]:
+        """Return state partitions based on tokens."""
+        for token in self.config["token"]:
+            yield {"token": token}
 
     def get_updated_state(
         self, current_stream_state: Dict[str, Any], latest_record: Dict[str, Any]
@@ -218,13 +240,15 @@ class CoingeckoStream(RESTStream):
         if isinstance(record_date, datetime):
             record_date = record_date.strftime("%Y-%m-%d")
 
-        bookmarks = current_stream_state["bookmarks"]
+        bookmarks = current_stream_state.get("bookmarks", {})
         if "coingecko_token" not in bookmarks:
             bookmarks["coingecko_token"] = {}
+
         bookmarks["coingecko_token"][token] = {
             "replication_key": self.replication_key,
             "replication_key_value": record_date,
         }
+        current_stream_state["bookmarks"] = bookmarks
         return current_stream_state
 
     def get_next_page_token(
