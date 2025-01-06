@@ -338,6 +338,34 @@ class CoingeckoStream(RESTStream):
         data["token"] = self.current_token
         return [data]
 
+    def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
+        """Process row data after retrieval."""
+        process_row = {
+            "date": row["date"],
+            "token": row["token"],
+        }
+
+        market_data = row.get("market_data", {})
+        if market_data:
+            current_price = market_data.get("current_price", {})
+            process_row.update(
+                {
+                    "price_usd": current_price.get("usd"),
+                    "price_btc": current_price.get("btc"),
+                    "price_eth": current_price.get("eth"),
+                    "market_cap_usd": market_data.get("market_cap", {}).get("usd"),
+                    "total_volume_usd": market_data.get("total_volume", {}).get("usd"),
+                }
+            )
+
+        community_data = row.get("community_data", {})
+        process_row["community_data"] = {
+            "twitter_followers": community_data.get("twitter_followers"),
+            "reddit_average_posts_48h": community_data.get("reddit_average_posts_48h"),
+        }
+
+        return process_row
+
     schema = th.PropertiesList(
         th.Property("date", th.StringType, required=True),
         th.Property("token", th.StringType, required=True),
