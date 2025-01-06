@@ -3,6 +3,7 @@
 import datetime
 import os
 
+import pytest
 from singer_sdk.testing import get_tap_test_class
 
 from tap_coingecko.tap import TapCoingecko
@@ -41,9 +42,51 @@ def get_test_config() -> dict:
 
 
 # Run standard built-in tap tests from the SDK:
-TestTapCoingecko = get_tap_test_class(
+TestBaseTapCoingecko = get_tap_test_class(
     tap_class=TapCoingecko,
     config=get_test_config(),
 )
 
-# TODO: Create additional tests as appropriate for your tap.
+
+class TestCustomTapCoingecko:
+    """Test cases for custom tap functionality."""
+
+    @pytest.fixture
+    def tap_instance(self) -> TapCoingecko:
+        """Create a tap instance with test config."""
+        return TapCoingecko(config=get_test_config())
+
+    def test_state_per_token(self, tap_instance: TapCoingecko) -> None:
+        """Test that state is properly managed per token."""
+        tap = tap_instance
+        stream = tap.streams["coingecko_token"]
+
+        # Test that state partitioning is configured correctly
+        assert stream.state_partitioning_keys == ["token"]
+
+        # Create some test records
+        records = [
+            {"date": "2025-01-05", "token": "ethereum", "data": "test1"},
+            {"date": "2025-01-04", "token": "bitcoin", "data": "test2"},
+            {"date": "2025-01-06", "token": "ethereum", "data": "test3"},
+        ]
+
+        # Process each record and check state updates
+        for record in records:
+            context = {"token": record["token"]}
+            # Simulate record processing
+            stream._increment_stream_state(record, context=context)
+
+        # Check the overall state structure
+        state = stream.tap_state["bookmarks"]["coingecko_token"]
+        assert "partitions" in state
+
+        # Find ethereum partition
+        eth_partition = next(p for p in state["partitions"] if p["context"]["token"] == "ethereum")
+        assert eth_partition["progress_markers"]["replication_key"] == "date"
+        assert eth_partition["progress_markers"]["replication_key_value"] == "2025-01-06"
+
+        # Find bitcoin partition
+        btc_partition = next(p for p in state["partitions"] if p["context"]["token"] == "bitcoin")
+        assert btc_partition["progress_markers"]["replication_key"] == "date"
+        assert btc_partition["progress_markers"]["replication_key_value"] == "2025-01-04"
