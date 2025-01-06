@@ -90,3 +90,18 @@ class TestCustomTapCoingecko:
         btc_partition = next(p for p in state["partitions"] if p["context"]["token"] == "bitcoin")
         assert btc_partition["progress_markers"]["replication_key"] == "date"
         assert btc_partition["progress_markers"]["replication_key_value"] == "2025-01-04"
+
+    def test_live_api_response_processing(self, tap_instance: TapCoingecko) -> None:
+        """Test processing of live API response."""
+        stream = tap_instance.streams["coingecko_token"]
+
+        # Get a single record from the actual API
+        records = list(stream.get_records(context={"token": "solana"}))
+
+        assert len(records) > 0
+        record = records[0]
+
+        # Verify record has expected structure
+        assert "price_usd" in record
+        assert isinstance(record["price_usd"], (float, type(None)))
+        assert isinstance(record["market_cap_usd"], (float, type(None)))
