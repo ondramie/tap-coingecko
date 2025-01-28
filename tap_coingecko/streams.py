@@ -369,6 +369,8 @@ class CoingeckoStream(RESTStream):
     schema = th.PropertiesList(
         th.Property("date", th.StringType, required=True),
         th.Property("token", th.StringType, required=True),
+        th.Property("name", th.StringType),
+        th.Property("symbol", th.StringType),
         th.Property("price_usd", th.NumberType),
         th.Property("price_btc", th.NumberType),
         th.Property("price_eth", th.NumberType),
