@@ -340,9 +340,12 @@ class CoingeckoStream(RESTStream):
 
     def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
         """Process row data after retrieval."""
+        self.logger.info(f"Fucken row data: {row}")
         process_row = {
             "date": row["date"],
             "token": row["token"],
+            "name": row.get("name"),
+            "symbol": row.get("symbol"),
         }
 
         market_data = row.get("market_data", {})
