@@ -343,6 +343,8 @@ class CoingeckoStream(RESTStream):
         process_row = {
             "date": row["date"],
             "token": row["token"],
+            "name": row.get("name"),
+            "symbol": row.get("symbol"),
         }
 
         market_data = row.get("market_data", {})
@@ -369,6 +371,8 @@ class CoingeckoStream(RESTStream):
     schema = th.PropertiesList(
         th.Property("date", th.StringType, required=True),
         th.Property("token", th.StringType, required=True),
+        th.Property("name", th.StringType),
+        th.Property("symbol", th.StringType),
         th.Property("price_usd", th.NumberType),
         th.Property("price_btc", th.NumberType),
         th.Property("price_eth", th.NumberType),
