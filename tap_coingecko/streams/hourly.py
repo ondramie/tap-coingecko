@@ -48,6 +48,42 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
             raise ValueError("No token has been set for the stream.")
         return f"/coins/{self.current_token}/market_chart"
 
+    def get_starting_replication_key_value(self, context: Optional[Mapping[str, Any]]) -> datetime:
+        """Return the starting replication key value from state or config.
+
+        Unlike the daily stream, hourly stream uses millisecond timestamps
+        as replication key values.
+        """
+        current_state = self.get_context_state(context)
+
+        # Get bookmark for current partition if it exists
+        bookmark = current_state.get("replication_key_value") if current_state else None
+
+        if bookmark:
+            self.logger.info(
+                f"Resuming sync for token {self.current_token} from bookmark {bookmark}"
+            )
+
+            # Handle case where bookmark is stored as millisecond timestamp (integer)
+            if isinstance(bookmark, int):
+                # Convert from millisecond epoch to datetime
+                return datetime.fromtimestamp(bookmark / 1000)
+
+            # Handle case where bookmark is stored as string timestamp
+            if isinstance(bookmark, str) and bookmark.isdigit():
+                # Convert from string millisecond epoch to datetime
+                return datetime.fromtimestamp(int(bookmark) / 1000)
+
+            # Handle case where bookmark is stored as ISO format string
+            return cast(datetime, pendulum.parse(bookmark))
+
+        # Fall back to start_date from config
+        config_start_date = self.config["start_date"]
+        self.logger.info(
+            f"Starting sync for token {self.current_token} from config date {config_start_date}"
+        )
+        return cast(datetime, pendulum.parse(config_start_date))
+
     def get_replication_key_signpost(
         self,
         context: Optional[Mapping[str, Any]],
@@ -81,7 +117,7 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
         self.logger.info(f"Signpost value: {signpost}")
 
         # Convert old_token to int for comparison with signpost
-        internal_token = self._datetime_to_ms(cast(Optional[datetime], old_token))
+        internal_token = self._datetime_to_ms(old_token)
         if internal_token is None:
             return None
 
@@ -112,15 +148,27 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
         self.logger.info(f"Backfill in progress, next token: {next_token}")
         return next_token
 
-    def _datetime_to_ms(self, dt: Optional[datetime]) -> Optional[int]:
-        """Convert datetime to millisecond timestamp."""
+    def _datetime_to_ms(self, dt: Optional[Union[datetime, int, str]]) -> Optional[int]:
+        """Convert datetime to millisecond timestamp.
+
+        Handles various input types: datetime, int (millisecond timestamp), or string.
+        """
         if dt is None:
             return None
 
+        # Already a millisecond timestamp
+        if isinstance(dt, int):
+            return dt
+
+        # String that represents a millisecond timestamp
+        if isinstance(dt, str) and dt.isdigit():
+            return int(dt)
+
+        # Datetime object
         if isinstance(dt, datetime):
             return int(dt.timestamp() * 1000)
 
-        # If we somehow got something else, try to convert it
+        # Try to parse string as datetime
         try:
             parsed_dt = pendulum.parse(str(dt))
             return int(parsed_dt.timestamp() * 1000)
@@ -131,21 +179,7 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
     def get_url_params(
         self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
-        """Generate URL parameters for API requests.
-
-        Parameters
-        ----------
-        context : Optional[Mapping[str, Any]]
-            Additional parameters or metadata for the request.
-        next_page_token : Optional[Any]
-            Token representing the next page of data.
-
-        Returns
-        -------
-        Dict[str, Any]
-            A dictionary of URL parameters.
-
-        """
+        """Generate URL parameters for API requests."""
         # Start with empty params
         params: dict = {}
 
@@ -162,10 +196,48 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
 
         # Initial request (or for backfill)
         if next_page_token is None:
-            # days: user-provided value, default to "1" if not specified
-            # "max" indicates a backfill
-            params["days"] = self.config.get("days", "1")
-            self.logger.info(f"Running sync with days={params['days']}")
+            # Check for the CORRECT Meltano full refresh environment variable
+            import os
+
+            is_full_refresh = os.environ.get("MELTANO_RUN_FULL_REFRESH", "").lower() in (
+                "1",
+                "true",
+                "t",
+                "yes",
+            )
+
+            # Log the environment variable status for debugging
+            self.logger.info(
+                f"MELTANO_RUN_FULL_REFRESH environment variable: '{os.environ.get('MELTANO_RUN_FULL_REFRESH')}'"  # noqa: E501
+            )
+
+            if is_full_refresh:
+                # Force days=max for --full-refresh
+                params["days"] = "max"
+                self.logger.info(
+                    f"FULL REFRESH detected via environment variable - using days=max for token {context.get('token') if context else 'unknown'}"  # noqa: E501
+                )
+            else:
+                # Check if we have state data (we still want days=max if no state)
+                has_state = False
+                if context and "token" in context:
+                    state_dict = self.get_context_state(context)
+                    if state_dict and state_dict.get("replication_key_value"):
+                        has_state = True
+
+                if not has_state:
+                    # No state, treat as initial run
+                    params["days"] = "max"
+                    self.logger.info(
+                        f"No state data found - using days=max for token {context.get('token') if context else 'unknown'}"  # noqa: E501
+                    )
+                else:
+                    # Normal incremental sync
+                    params["days"] = "1"
+                    self.logger.info("Incremental sync with existing state - using days=1")
+
+            # Add explicit log to show final decision on days parameter
+            self.logger.info(f"Final URL parameter days={params['days']}")
             return params
 
         # For pagination requests
@@ -180,6 +252,8 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
 
             # Add 1 to ensure we include the current day
             params["days"] = str(int(days_diff) + 1)
+            # Add debug log to see exact parameters
+            self.logger.debug(f"URL parameters for pagination: {params}")
             return params
 
         raise ValueError("Invalid next_page_token type; expected datetime or None.")
@@ -273,6 +347,7 @@ class CoingeckoHourlyStream(CoingeckoDailyStream):
             prepared_request = self.prepare_request(context, next_page_token)
             prepared_request.headers.update(self.get_request_headers())
             self.logger.info(f"Making request to: {prepared_request.url}")
+            self.logger.info(f"Making request to: {prepared_request.headers}")
 
             # Make the API request
             response = decorated_request(prepared_request, context)
