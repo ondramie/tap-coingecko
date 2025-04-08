@@ -7,7 +7,7 @@ to fetch daily historical cryptocurrency data.
 import copy
 import time
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Union, cast
 
 import backoff
 import pendulum
@@ -22,7 +22,7 @@ API_HEADERS = {
 }
 
 
-class CoingeckoStream(RESTStream):
+class CoingeckoDailyStream(RESTStream):
     """RESTStream for fetching daily historical CoinGecko token data.
 
     This class implements incremental replication for historical cryptocurrency
@@ -44,7 +44,7 @@ class CoingeckoStream(RESTStream):
     def get_replication_key_signpost(
         self,
         context: Optional[Mapping[str, Any]],
-    ) -> datetime:
+    ) -> Union[datetime, int]:
         """Return the signpost value for the replication key (yesterday's date)."""
         return pendulum.yesterday(tz="UTC")
 
@@ -92,7 +92,7 @@ class CoingeckoStream(RESTStream):
         """
         return self.config["api_url"]
 
-    @property
+    @property  # type: ignore[override]
     def path(self) -> str:
         """Return the API endpoint path for the current token.
 
@@ -173,6 +173,7 @@ class CoingeckoStream(RESTStream):
         while next_page_token:
             prepared_request = self.prepare_request(context, next_page_token)
             prepared_request.headers.update(self.get_request_headers())
+            self.logger.info(f"Prepared request: {prepared_request}")
             response = decorated_request(prepared_request, context)
 
             for record in self.parse_response(response, next_page_token):
@@ -313,7 +314,9 @@ class CoingeckoStream(RESTStream):
         raise ValueError("Invalid next_page_token type; expected datetime or None.")
 
     def parse_response(
-        self, response: requests.Response, next_page_token: Optional[datetime]
+        self,
+        response: requests.Response,
+        next_page_token: Optional[datetime],  # type: ignore[override]
     ) -> Iterable[dict]:
         """Parse API response.
 

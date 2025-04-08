@@ -3,12 +3,15 @@
 from typing import List
 
 from singer_sdk import Stream, Tap
-from singer_sdk import typing as th
+from singer_sdk import typing as th  # JSON schema typing helpers
 
-# JSON schema typing helpers
-from tap_coingecko.streams import CoingeckoStream
+from tap_coingecko.streams.hourly import CoingeckoDailyStream, CoingeckoHourlyStream
 
-STREAM_TYPES = [CoingeckoStream]
+# Define all available stream types for this tap
+STREAM_TYPES = [
+    CoingeckoDailyStream,
+    CoingeckoHourlyStream,
+]
 
 
 class TapCoingecko(Tap):
@@ -51,8 +54,31 @@ class TapCoingecko(Tap):
             description="Number of seconds to wait between requests",
             default=5,
         ),
+        # Add optional parameters for more granular control
+        th.Property(
+            "days",
+            th.StringType,
+            description="Number of days of data to retrieve (integer or 'max')",
+            default="1",
+        ),
+        th.Property(
+            "vs_currency",
+            th.StringType,
+            description="Target currency for market data",
+            default="usd",
+        ),
+        th.Property(
+            "interval",
+            th.StringType,
+            description="Data granularity interval (leave blank for auto granularity)",
+        ),
+        th.Property(
+            "precision",
+            th.StringType,
+            description="Decimal place for currency price value",
+        ),
     ).to_dict()
 
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams."""
-        return [CoingeckoStream(tap=self)]  # Just return a single stream instance
+        return [stream_class(tap=self) for stream_class in STREAM_TYPES]
