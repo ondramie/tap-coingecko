@@ -16,7 +16,7 @@ from singer_sdk import typing as th  # JSON Schema typing helpers
 from singer_sdk.exceptions import RetriableAPIError
 from singer_sdk.helpers import types
 from singer_sdk.streams import RESTStream
-from streams.utils import API_HEADERS, ApiType
+from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 
 class CoingeckoDailyStream(RESTStream):
@@ -40,7 +40,7 @@ class CoingeckoDailyStream(RESTStream):
 
     def get_replication_key_signpost(
         self, context: types.Context | None
-    ) -> datetime | th.Any | None:
+    ) -> datetime | Any | None:
         """Return the signpost value for the replication key (yesterday's date).
 
         Overrides the default method to return yesterday's date in UTC.
