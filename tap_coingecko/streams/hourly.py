@@ -13,7 +13,7 @@ from singer_sdk import typing as th  # JSON Schema typing helpers
 from singer_sdk.helpers import types
 from singer_sdk.streams import RESTStream
 
-from tap_coingecko.streams.utils import ApiType
+from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 
 class CoingeckoHourlyStream(RESTStream):
@@ -24,26 +24,32 @@ class CoingeckoHourlyStream(RESTStream):
     Enterprise plan subscribers.
     """
 
-    name: Optional[str] = None
+    name = "token_price_hr"  # Single stream name for all tokens
     primary_keys = ["timestamp", "token"]
     replication_key = "timestamp"
     replication_method = "INCREMENTAL"
-    #state_partitioning_keys = ["token"]
+    state_partitioning_keys = ["token"]  # Enable state partitioning by token
     current_token: Optional[str] = None
 
-    # def get_context_state(self, context: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
-    #     """Return state for the current context partition."""
-    #     if context and "token" in context:
-    #         return self.get_state(context["token"])
-    #     return None
+    def get_request_headers(self) -> Dict[str, str]:
+        """Return API request headers based on the API type and key.
+
+        Returns:
+            A dictionary containing headers to authenticate requests.
+        """
+        header_key = API_HEADERS.get(self.config["api_url"])
+        if header_key and self.config.get("api_key"):
+            return {header_key: self.config["api_key"]}
+        return {}
+
+    def get_state_partitions(self, context: Optional[Mapping[str, Any]] = None) -> Iterable[dict]:
+        """Return state partitions based on tokens."""
+        for token in self.config["token"]:
+            yield {"token": token}
 
     @property
     def url_base(self) -> str:
-        """Return the base URL for API requests.
-
-        Returns:
-            The base URL.
-        """
+        """Return the base URL for API requests."""
         match self.config["api_url"]:
             case ApiType.PRO.value:
                 return ApiType.PRO.value
@@ -52,30 +58,21 @@ class CoingeckoHourlyStream(RESTStream):
             case _:
                 raise ValueError(f"Invalid API URL: {self.config['api_url']}. ")
 
-    @property  # type: ignore[override]
+    @property
     def path(self) -> str:
-        """Return the API endpoint path for the current token's hourly data.
-
-        Returns:
-            The API endpoint path for the current token's hourly data.
-        """
-        if not hasattr(self, "current_token"):
+        """Return the API endpoint path for the current token's hourly data."""
+        if not hasattr(self, "current_token") or not self.current_token:
             raise ValueError("No token has been set for the stream.")
         return f"/coins/{self.current_token}/market_chart"
 
     def get_starting_replication_key_value(self, context: Optional[Mapping[str, Any]]) -> int:
-        """Return the starting replication key value from state or config.
-
-        Unlike the daily stream, hourly stream uses millisecond timestamps
-        as replication key values.
-        """
+        """Return the starting replication key value from state or config."""
+        # Get state for the current token partition
         current_state = self.get_context_state(context)
-
-        self.logger.debug(f"Current state: {current_state}")
+        self.logger.debug(f"Current state for context {context}: {current_state}")
 
         # Get bookmark for current partition if it exists
         bookmark = current_state.get("replication_key_value") if current_state else None
-
         self.logger.debug(f"Bookmark for token {self.current_token}: {bookmark}")
 
         if bookmark:
@@ -136,20 +133,48 @@ class CoingeckoHourlyStream(RESTStream):
 
         return params
 
+    def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
+        """Request records for all configured tokens."""
+        tokens = self.config["token"]
+        self.logger.info(f"Starting sync for tokens: {tokens}")
+
+        for token in tokens:
+            self.logger.info(f"Processing token: {token}")
+            self.current_token = token
+            token_context = {"token": token}
+
+            # Prepare the request
+            prepared_request = self.prepare_request(token_context, None)
+            prepared_request.headers.update(self.get_request_headers())
+            self.logger.info(f"Making request to: {prepared_request.url}")
+
+            # Make the API request
+            response = self._request(prepared_request, token_context)
+            self.logger.info(f"Response status: {response.status_code}")
+
+            # Parse the response
+            for record in self.parse_response(response):
+                # Process the record
+                processed_record = self.post_process(record, token_context)
+
+                # Important: Update the state with this record
+                self._increment_stream_state(processed_record, context=token_context)
+
+                yield processed_record
+
+            # Apply rate limiting if needed
+            if self.config["api_url"] != "https://pro-api.coingecko.com/api/v3":
+                import time
+
+                sleep_time = self.config.get("wait_time_between_requests", 5)
+                self.logger.info(f"Sleeping for {sleep_time} seconds...")
+                time.sleep(sleep_time)
+
     def parse_response(
         self,
         response: requests.Response,
-        # next_page_token: Optional[datetime],  # type: ignore[override]
     ) -> Iterable[dict]:
-        """Parse API response for market chart data.
-
-        Args:
-            response: The API response object.
-            next_page_token: The next page token for pagination (not used here).
-
-        Yields:
-            Parsed response records as dictionaries.
-        """
+        """Parse API response for market chart data."""
         self.logger.info(f"Parsing response for token: {self.current_token}")
 
         response.raise_for_status()
@@ -171,8 +196,10 @@ class CoingeckoHourlyStream(RESTStream):
 
         records = []
         for timestamp, price in prices:
+
             record = {
                 "timestamp": timestamp,
+                "iso_timestamp": pendulum.from_timestamp(timestamp / 1000).isoformat(),
                 "token": self.current_token,
                 "price_usd": price,
                 "market_cap_usd": market_caps_dict.get(timestamp),
@@ -183,17 +210,12 @@ class CoingeckoHourlyStream(RESTStream):
         return records
 
     def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
-        """Process row data after retrieval for hourly data.
-
-        Simplified compared to the daily version since we're already getting
-        processed data from the market_chart endpoint.
-        """
-        # The data is already mostly processed in parse_response
-        # Just return the row as is or add any additional processing needed
+        """Process row data after retrieval for hourly data."""
         return row
 
     schema = th.PropertiesList(
         th.Property("timestamp", th.IntegerType, required=True),
+        th.Property("iso_timestamp", th.StringType, required=True),
         th.Property("token", th.StringType, required=True),
         th.Property("price_usd", th.NumberType),
         th.Property("market_cap_usd", th.NumberType),
