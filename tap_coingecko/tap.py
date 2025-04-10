@@ -5,13 +5,8 @@ from typing import List
 from singer_sdk import Stream, Tap
 from singer_sdk import typing as th  # JSON schema typing helpers
 
-from tap_coingecko.streams.hourly import CoingeckoDailyStream, CoingeckoHourlyStream
-
-# Define all available stream types for this tap
-STREAM_TYPES = [
-    CoingeckoDailyStream,
-    CoingeckoHourlyStream,
-]
+from tap_coingecko.streams.base import CoingeckoDailyStream
+from tap_coingecko.streams.factory import TokenStreamFactory
 
 
 class TapCoingecko(Tap):
@@ -24,14 +19,14 @@ class TapCoingecko(Tap):
             "token",
             th.ArrayType(th.StringType),
             required=True,
-            description="The name of the token to import the price history of",
+            description="The name of the token(s) to import the price history of",
             default=["ethereum", "solana"],
         ),
         th.Property(
             "api_url",
             th.StringType,
             required=True,
-            description="Coingecko's api url",
+            description="Coingecko's BASE API URL",
             default="https://api.coingecko.com/api/v3",
         ),
         th.Property(
@@ -44,7 +39,7 @@ class TapCoingecko(Tap):
             "start_date",
             th.StringType,
             required=True,
-            description="First date to obtain token price for",
+            description="First date to obtain token price for (YYYY-MM-DD)",
             default="2022-03-01",
         ),
         th.Property(
@@ -54,7 +49,7 @@ class TapCoingecko(Tap):
             description="Number of seconds to wait between requests",
             default=5,
         ),
-        # Add optional parameters for more granular control
+        # 5m/1hr/1d stream specific properties
         th.Property(
             "days",
             th.StringType,
@@ -76,9 +71,24 @@ class TapCoingecko(Tap):
             "precision",
             th.StringType,
             description="Decimal place for currency price value",
+            default="full",
         ),
     ).to_dict()
 
     def discover_streams(self) -> List[Stream]:
-        """Return a list of discovered streams."""
-        return [stream_class(tap=self) for stream_class in STREAM_TYPES]
+        """Return a list of discovered streams.
+
+        This method generates a separate stream for each token in the config.
+        """
+        streams = [CoingeckoDailyStream(tap=self)]
+
+        tokens = self.config["token"]
+
+        # Generate all stream classes for the tokens in the config
+        stream_classes = TokenStreamFactory.generate_stream_classes(
+            tokens=tokens,
+        )
+
+        daily_streams = [stream_class(tap=self) for stream_class in stream_classes]
+        streams.extend(daily_streams)
+        return streams
