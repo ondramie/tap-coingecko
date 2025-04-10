@@ -82,15 +82,3 @@ class TapCoingecko(Tap):
         """
         streams = [CoingeckoDailyStream(tap=self), CoingeckoHourlyStream(tap=self)]
         return streams
-
-        # tokens = self.config["token"]
-
-        # # Generate all stream classes for the tokens in the config
-        # stream_classes = TokenStreamFactory.generate_stream_classes(
-        #     tokens=tokens,
-        # )
-
-        # daily_streams = [stream_class(tap=self) for stream_class in stream_classes]
-        # streams.extend(daily_streams)
-        # self.logger.info(f"Discovered streams: {[stream.name for stream in streams]}")
-        # return streams

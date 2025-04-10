@@ -7,7 +7,6 @@ class ApiType(Enum):
 
 
 API_HEADERS = {
-    # TODO: make this an enum
     "https://pro-api.coingecko.com/api/v3": "x-cg-pro-api-key",
     "https://api.coingecko.com/api/v3": "x-cg-demo-api-key",
 }
