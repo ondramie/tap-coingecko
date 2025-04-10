@@ -13,7 +13,8 @@ import requests
 from singer_sdk import typing as th  # JSON Schema typing helpers
 from singer_sdk.helpers import types
 from singer_sdk.streams import RESTStream
-from streams.utils import ApiType
+
+from tap_coingecko.streams.utils import ApiType
 
 
 class CoingeckoHourlyStream(RESTStream):
