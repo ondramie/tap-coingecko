@@ -97,7 +97,7 @@ class CoingeckoHourlyStream(RESTStream):
         context: types.Context | None,
     ) -> int:
         """Return the signpost value for the replication key (current time in millisecond epoch)."""
-        return pendulum.now(tz="UTC").int_timestamp() * 1000
+        return pendulum.now(tz="UTC").int_timestamp * 1000
 
     def get_url_params(
         self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
