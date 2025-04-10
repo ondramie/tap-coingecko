@@ -90,7 +90,7 @@ class CoingeckoHourlyStream(RESTStream):
             f"Starting sync for token {self.current_token} from config date {config_start_date}"
         )
         # Convert the config start date directly to millisecond epoch timestamp
-        return (pendulum.parse(config_start_date)).int_timestamp() * 1000
+        return pendulum.parse(config_start_date).int_timestamp * 1000
 
     def get_replication_key_signpost(
         self,
