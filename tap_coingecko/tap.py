@@ -91,4 +91,5 @@ class TapCoingecko(Tap):
 
         daily_streams = [stream_class(tap=self) for stream_class in stream_classes]
         streams.extend(daily_streams)
+        self.logger.info(f"Discovered streams: {[stream.name for stream in streams]}")
         return streams

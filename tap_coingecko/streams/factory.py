@@ -28,7 +28,7 @@ class TokenStreamFactory:
             class_name,
             (CoingeckoHourlyStream,),
             {
-                "name": "token_price_hourly",
+                "name": f"{token.lower()}_token_price",
                 "current_token": token.lower(),
                 "__doc__": f"Stream for hourly {token} data from CoinGecko.",
             },

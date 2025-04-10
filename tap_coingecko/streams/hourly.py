@@ -5,7 +5,6 @@ to fetch hourly historical cryptocurrency data.
 """
 
 import os
-from datetime import datetime
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 import pendulum
@@ -29,7 +28,14 @@ class CoingeckoHourlyStream(RESTStream):
     primary_keys = ["timestamp", "token"]
     replication_key = "timestamp"
     replication_method = "INCREMENTAL"
+    #state_partitioning_keys = ["token"]
     current_token: Optional[str] = None
+
+    # def get_context_state(self, context: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    #     """Return state for the current context partition."""
+    #     if context and "token" in context:
+    #         return self.get_state(context["token"])
+    #     return None
 
     @property
     def url_base(self) -> str:
@@ -133,7 +139,7 @@ class CoingeckoHourlyStream(RESTStream):
     def parse_response(
         self,
         response: requests.Response,
-        next_page_token: Optional[datetime],  # type: ignore[override]
+        # next_page_token: Optional[datetime],  # type: ignore[override]
     ) -> Iterable[dict]:
         """Parse API response for market chart data.
 
