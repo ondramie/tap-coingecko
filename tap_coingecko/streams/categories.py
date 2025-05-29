@@ -1,5 +1,3 @@
-# tap_coingecko/streams/categories.py
-
 import time
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, List
 
@@ -13,11 +11,6 @@ from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 
 class CoinCategoriesStream(RESTStream):
-    """
-    RESTStream for fetching CoinGecko coin categories.
-    Follows the structure of CoingeckoDailyStream (base.py) where applicable.
-    """
-
     name = "coin_categories"
     primary_keys = ["coin_id"]
     replication_method = "FULL_TABLE"
@@ -36,7 +29,6 @@ class CoinCategoriesStream(RESTStream):
 
     @property
     def url_base(self) -> str:
-        """Return the base URL for API requests. (Copied from base.py)"""
         api_url_config = self.config.get("api_url")
         if api_url_config == ApiType.PRO.value:
             return ApiType.PRO.value
@@ -46,17 +38,14 @@ class CoinCategoriesStream(RESTStream):
             self.logger.error(f"Invalid 'api_url' in config: '{api_url_config}'. Expected one of: {[e.value for e in ApiType]}.")
             raise ValueError(f"Invalid API URL: {api_url_config}. ")
 
-
     @property
     def path(self) -> str:
-        """Return the API endpoint path for the current token. (Adapted from base.py)"""
         if not self.current_token:
             self.logger.error(f"[{self.name}] 'current_token' accessed before being set.")
             raise ValueError("No token has been set for the stream.")
         return f"/coins/{self.current_token}"
 
     def get_request_headers(self) -> Dict[str, str]:
-        """Return API request headers. (Copied from base.py)"""
         headers: Dict[str, str] = {}
         api_url_config = self.config.get("api_url")
         api_key_value = self.config.get("api_key")
@@ -73,7 +62,6 @@ class CoinCategoriesStream(RESTStream):
         return headers
 
     def request_decorator(self, func: Callable) -> Callable:
-        """Retry logic for API requests. (Copied from base.py, enhanced on_giveup)"""
         return backoff.on_exception(
             backoff.expo,
             (RetriableAPIError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError),
@@ -88,15 +76,9 @@ class CoinCategoriesStream(RESTStream):
     def get_url_params(
         self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
-        """Generate URL parameters for API requests."""
-        # This endpoint /coins/{id} for categories does not need pagination parameters.
-        # It can take optional boolean flags to reduce data, but for simplicity and
-        # to match your local script (which sends no params), we return an empty dict.
         return {}
 
-
     def parse_response(self, response: requests.Response) -> Iterable[Dict]:
-        """Parse API response. (Specific to /coins/{id} endpoint)"""
         self.logger.debug(f"[{self.name}] Parsing response for token '{self.current_token}'. Status: {response.status_code}")
         try:
             data = response.json()
@@ -122,13 +104,14 @@ class CoinCategoriesStream(RESTStream):
         }
 
     def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[Dict]:
-        """Fetch records for all configured tokens. (Adapted from base.py)"""
         tokens_to_sync: List[str] = self.config.get("token", [])
         self.logger.info(f"[{self.name}] Starting request_records for tokens: {tokens_to_sync}")
 
         if not tokens_to_sync:
             self.logger.warning(f"[{self.name}] No tokens configured. Stream will be empty.")
             return
+
+        sensitive_header_names_lower = [h.lower() for h in API_HEADERS.values()]
 
         for token_id in tokens_to_sync:
             self.current_token = token_id
@@ -145,24 +128,15 @@ class CoinCategoriesStream(RESTStream):
                 if auth_headers:
                     prepared_request.headers.update(auth_headers)
                 
-                # --- CORRECTED LOGGING LINE ---
-                # The PreparedRequest object's __str__ or __repr__ usually shows URL and method.
-                # To explicitly show URL and headers without relying on a .params attribute:
-                url_params_for_log = self.get_url_params(context=token_context, next_page_token=None) # Get what would be params
-                full_url_for_log = prepared_request.url
-                if url_params_for_log: # If get_url_params returned anything, show it
-                     # Note: requests library typically merges params into the URL in PreparedRequest
-                     # or handles them separately. For logging, showing what get_url_params *would* send is useful.
-                     # However, the actual prepared_request.url might already have them if they were simple.
-                     # For this stream, get_url_params returns {}, so url_params_for_log will be empty.
-                     pass # No explicit params to log for this stream as get_url_params is {}
-
+                headers_for_log = dict(prepared_request.headers)
+                for key, value in headers_for_log.items():
+                    if key.lower() in sensitive_header_names_lower:
+                        headers_for_log[key] = "[REDACTED]"
+                
                 self.logger.info(
                     f"[{self.name}] Requesting for {self.current_token}: "
-                    f"URL={full_url_for_log}, Headers={prepared_request.headers}"
+                    f"URL={prepared_request.url}, Headers={headers_for_log}"
                 )
-                # --- END CORRECTED LOGGING LINE ---
-
 
                 response = self._request(prepared_request, token_context)
 
@@ -186,7 +160,6 @@ class CoinCategoriesStream(RESTStream):
                 )
             except Exception as e:
                 self.logger.error(f"[{self.name}] Unexpected error processing token '{self.current_token}': {e}. Skipping token.", exc_info=True)
-
 
             api_url_config = self.config.get("api_url")
             if api_url_config and api_url_config != ApiType.PRO.value:
