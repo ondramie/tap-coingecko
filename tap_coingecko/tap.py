@@ -7,6 +7,7 @@ from singer_sdk import typing as th  # JSON schema typing helpers
 
 from tap_coingecko.streams.base import CoingeckoDailyStream
 from tap_coingecko.streams.hourly import CoingeckoHourlyStream
+from tap_coingecko.streams.categories import CoinCategoriesStream
 
 
 class TapCoingecko(Tap):
@@ -80,5 +81,5 @@ class TapCoingecko(Tap):
 
         This method generates a separate stream for each token in the config.
         """
-        streams = [CoingeckoDailyStream(tap=self), CoingeckoHourlyStream(tap=self)]
+        streams = [CoingeckoDailyStream(tap=self), CoingeckoHourlyStream(tap=self), CoinCategoriesStream(tap=self)]
         return streams
