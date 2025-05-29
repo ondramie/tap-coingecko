@@ -80,5 +80,5 @@ class TapCoingecko(Tap):
 
         This method generates a separate stream for each token in the config.
         """
-        streams = [CoingeckoDailyStream(tap=self), CoingeckoHourlyStream(tap=self)]
+        streams = [CoingeckoDailyStream(tap=self), CoingeckoHourlyStream(tap=self), CoinCategoriesStream(tap=self)]
         return streams
