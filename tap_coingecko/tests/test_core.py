@@ -1,14 +1,47 @@
 """Tests standard tap features using the built-in SDK tests library."""
 
 import datetime
+import logging.config
 import os
 import warnings
+from typing import Any, Dict
 
 import pytest
+import singer_sdk.metrics
 from singer_sdk.testing import get_tap_test_class
 from singer_sdk.testing.config import SuiteConfig
 
 from tap_coingecko.tap import TapCoingecko
+
+
+# Patch the problematic logging functions at the module level
+def mock_load_yaml_logging_config(path: str) -> Dict[str, Any]:
+    """Mock YAML logging config loader that returns a basic config."""
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {"simple": {"format": "%(levelname)s:%(name)s:%(message)s"}},
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "INFO",
+                "formatter": "simple",
+                "stream": "ext://sys.stdout",
+            }
+        },
+        "loggers": {"singer": {"level": "INFO", "handlers": ["console"], "propagate": False}},
+        "root": {"level": "INFO", "handlers": ["console"]},
+    }
+
+
+def mock_setup_logging(config: Dict[str, Any], *, package: str) -> None:
+    """Mock logging setup that uses basic configuration."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
+
+# Apply the patches immediately after import
+singer_sdk.metrics._load_yaml_logging_config = mock_load_yaml_logging_config
+singer_sdk.metrics._setup_logging = mock_setup_logging
 
 YESTERDAY = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).strftime(
     "%Y-%m-%d"
@@ -111,14 +144,14 @@ class TestCustomTapCoingecko:
     def test_state_per_token_hourly(self, tap_instance: TapCoingecko) -> None:
         """Test that state is properly managed per token for the hourly stream."""
         # If the hourly stream doesn't exist, warn and skip rather than fail:
-        if "coingecko_token_hourly" not in tap_instance.streams:
+        if "token_price_hr" not in tap_instance.streams:
             warnings.warn(
                 "Hourly stream not found. Skipping 'test_state_per_token_hourly'.", stacklevel=2
             )
             return
 
         # Grab the hourly stream
-        stream = tap_instance.streams["coingecko_token_hourly"]
+        stream = tap_instance.streams["token_price_hr"]
 
         # We assume the partitioning is by the 'token' field:
         assert stream.state_partitioning_keys == ["token"]
@@ -139,7 +172,7 @@ class TestCustomTapCoingecko:
             stream._increment_stream_state(record, context=context)
 
         # The test checks the final state in "bookmarks" for this stream:
-        state = stream.tap_state["bookmarks"]["coingecko_token_hourly"]
+        state = stream.tap_state["bookmarks"]["token_price_hr"]
         assert "partitions" in state, f"Expected 'partitions' in state: {state}"
 
         # Find partition for Ethereum
@@ -161,13 +194,13 @@ class TestCustomTapCoingecko:
         tap = tap_instance
 
         # Check that the hourly stream is registered
-        assert "coingecko_token_hourly" in tap.streams
+        assert "token_price_hr" in tap.streams
 
         # Get the hourly stream
-        hourly_stream = tap.streams["coingecko_token_hourly"]
+        hourly_stream = tap.streams["token_price_hr"]
 
         # Test basic configuration
-        assert hourly_stream.name == "coingecko_token_hourly"
+        assert hourly_stream.name == "token_price_hr"
         assert hourly_stream.primary_keys == ["timestamp", "token"]
         assert hourly_stream.replication_key == "timestamp"
         assert hourly_stream.replication_method == "INCREMENTAL"
@@ -185,7 +218,7 @@ class TestCustomTapCoingecko:
         logging.basicConfig(level=logging.INFO)
 
         # Get the hourly stream
-        stream = tap_instance.streams["coingecko_token_hourly"]
+        stream = tap_instance.streams["token_price_hr"]
 
         # Force a request
         stream.current_token = "ethereum"

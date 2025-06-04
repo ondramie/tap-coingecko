@@ -5,7 +5,7 @@ to fetch hourly historical cryptocurrency data.
 """
 
 import os
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional, cast
 
 import pendulum
 import requests
@@ -34,8 +34,11 @@ class CoingeckoHourlyStream(RESTStream):
     def get_request_headers(self) -> Dict[str, str]:
         """Return API request headers based on the API type and key.
 
-        Returns:
+        Returns
+        -------
+        dict
             A dictionary containing headers to authenticate requests.
+
         """
         header_key = API_HEADERS.get(self.config["api_url"])
         if header_key and self.config.get("api_key"):
@@ -58,7 +61,7 @@ class CoingeckoHourlyStream(RESTStream):
             case _:
                 raise ValueError(f"Invalid API URL: {self.config['api_url']}. ")
 
-    @property
+    @property  # type: ignore[override]
     def path(self) -> str:
         """Return the API endpoint path for the current token's hourly data."""
         if not hasattr(self, "current_token") or not self.current_token:
@@ -93,14 +96,14 @@ class CoingeckoHourlyStream(RESTStream):
             f"Starting sync for token {self.current_token} from config date {config_start_date}"
         )
         # Convert the config start date directly to millisecond epoch timestamp
-        return pendulum.parse(config_start_date).int_timestamp * 1000
+        return int(cast(pendulum.DateTime, pendulum.parse(config_start_date)).timestamp() * 1000)
 
     def get_replication_key_signpost(
         self,
         context: types.Context | None,
     ) -> int:
         """Return the signpost value for the replication key (current time in millisecond epoch)."""
-        return pendulum.now(tz="UTC").int_timestamp * 1000
+        return int(pendulum.now(tz="UTC").timestamp() * 1000)
 
     def get_url_params(
         self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
@@ -196,7 +199,6 @@ class CoingeckoHourlyStream(RESTStream):
 
         records = []
         for timestamp, price in prices:
-
             record = {
                 "timestamp": timestamp,
                 "iso_timestamp": pendulum.from_timestamp(timestamp / 1000).isoformat(),

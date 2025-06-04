@@ -44,18 +44,27 @@ class CoingeckoDailyStream(RESTStream):
 
         Overrides the default method to return yesterday's date in UTC.
 
-        Args:
-            context: Optional context for the stream.
-        Returns:
+        Args
+        ----
+        context : types.Context | None
+            Optional context for the stream.
+
+        Returns
+        -------
+        datetime | Any | None
             Max allowable bookmark value for this stream's replication key.
+
         """
         return pendulum.yesterday(tz="UTC")
 
     def get_concurrent_request_parameters(self) -> Optional[Mapping[str, Any]]:
         """Return request parameters for concurrent requests based on API type.
 
-        Returns:
+        Returns
+        -------
+        Optional[Mapping[str, Any]]
             Mapping of concurrency parameters for the Pro API, or None for the free API.
+
         """
         match self.config["api_url"]:
             case ApiType.PRO.value:
@@ -70,8 +79,11 @@ class CoingeckoDailyStream(RESTStream):
     def get_request_headers(self) -> Dict[str, str]:
         """Return API request headers based on the API type and key.
 
-        Returns:
+        Returns
+        -------
+        Dict[str, str]
             A dictionary containing headers to authenticate requests.
+
         """
         header_key = API_HEADERS.get(self.config["api_url"])
         if header_key and self.config.get("api_key"):
@@ -82,8 +94,11 @@ class CoingeckoDailyStream(RESTStream):
     def url_base(self) -> str:
         """Return the base URL for API requests.
 
-        Returns:
+        Returns
+        -------
+        str
             The base URL.
+
         """
         match self.config["api_url"]:
             case ApiType.PRO.value:
@@ -97,8 +112,11 @@ class CoingeckoDailyStream(RESTStream):
     def path(self) -> str:
         """Return the API endpoint path for the current token.
 
-        Returns:
+        Returns
+        -------
+        str
             The API endpoint path.
+
         """
         if not hasattr(self, "current_token"):
             raise ValueError("No token has been set for the stream.")
@@ -107,10 +125,14 @@ class CoingeckoDailyStream(RESTStream):
     def request_decorator(self, func: Callable) -> Callable:
         """Retry logic for API requests.
 
-        Args:
-            func: The function to be decorated with retry logic.
+        Args
+        ----
+        func : Callable
+            The function to be decorated with retry logic.
 
-        Returns:
+        Returns
+        -------
+        Callable
             A callable with retry capabilities.
 
         """
@@ -124,11 +146,16 @@ class CoingeckoDailyStream(RESTStream):
     def request_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
         """Fetch records for all tokens from the API.
 
-        Args:
-            context: Additional parameters or metadata for the request.
+        Args
+        ----
+        context : Optional[Mapping[str, Any]]
+            Additional parameters or metadata for the request.
 
-        Yields:
+        Yields
+        ------
+        dict
             Individual token records.
+
         """
         self.logger.info(f"Starting request_records with tokens: {self.config['token']}")
         for token in self.config["token"]:
@@ -141,11 +168,16 @@ class CoingeckoDailyStream(RESTStream):
     def _fetch_token_data(self, context: Optional[Mapping[str, Any]]) -> Iterable[dict]:
         """Fetch historical data for a specific token.
 
-        Args:
-            context: Additional parameters or metadata for the request.
+        Args
+        ----
+        context : Optional[Mapping[str, Any]]
+            Additional parameters or metadata for the request.
 
-        Yields:
+        Yields
+        ------
+        dict
             Parsed response records for the given token.
+
         """
         self.logger.info(f"Fetching token for context: {self.context}")
         next_page_token = self.get_next_page_token(None, None, context)
@@ -160,7 +192,9 @@ class CoingeckoDailyStream(RESTStream):
             self.logger.info(f"Prepared request: {prepared_request}")
             response = decorated_request(prepared_request, context)
 
-            for record in self.parse_response(response, next_page_token):
+            # Store next_page_token as instance variable for parse_response to access
+            self._current_page_token = next_page_token
+            for record in self.parse_response(response):
                 record_with_context = record if context is None else {**record, **context}
                 self._increment_stream_state(record_with_context, context=context)
                 yield record_with_context
@@ -205,12 +239,18 @@ class CoingeckoDailyStream(RESTStream):
     ) -> Dict[str, Any]:
         """Update state for a token based on the latest record.
 
-        Args:
-            current_stream_state: The current state of the stream.
-            latest_record: The latest record being processed.
+        Args
+        ----
+        current_stream_state : Dict[str, Any]
+            The current state of the stream.
+        latest_record : Dict[str, Any]
+            The latest record being processed.
 
-        Returns:
-            The updated state dictionary
+        Returns
+        -------
+        Dict[str, Any]
+            The updated state dictionary.
+
         """
         current_stream_state = current_stream_state or {"bookmarks": {}}
         token = latest_record["token"]
@@ -270,11 +310,18 @@ class CoingeckoDailyStream(RESTStream):
     ) -> Dict[str, Any]:
         """Generate URL parameters for API requests.
 
-        Args:
-            context: Additional parameters or metadata for the request.
-            next_page_token: Token representing the next page of data.
+        Args
+        ----
+        context : Optional[Mapping[str, Any]]
+            Additional parameters or metadata for the request.
+        next_page_token : Optional[Any]
+            Token representing the next page of data.
 
-        Returns: A dictionary of URL parameters.
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary of URL parameters.
+
         """
         if next_page_token is None:
             return {"localization": "false"}
@@ -287,22 +334,27 @@ class CoingeckoDailyStream(RESTStream):
     def parse_response(
         self,
         response: requests.Response,
-        next_page_token: Optional[datetime],  # type: ignore[override]
     ) -> Iterable[dict]:
         """Parse API response.
 
-        Args:
-            response: The HTTP response from the API.
-            next_page_token: Token representing the current page.
+        Args
+        ----
+        response : requests.Response
+            The HTTP response from the API.
+        next_page_token : Optional[datetime]
+            Token representing the current page.
 
-        Yields: Parsed response records.
+        Yields
+        ------
+        dict
+            Parsed response records.
 
         """
-        if next_page_token is None:
+        if self._current_page_token is None:
             raise ValueError("next_page_token cannot be None during parsing.")
 
         data = response.json()
-        data["date"] = next_page_token.strftime("%Y-%m-%d")
+        data["date"] = self._current_page_token.strftime("%Y-%m-%d")
         data["token"] = self.current_token
         return [data]
 
