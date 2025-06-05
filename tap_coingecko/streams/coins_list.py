@@ -1,6 +1,6 @@
 """Stream for extracting coin list data from CoinGecko API."""
 
-from typing import Any, Dict, Mapping, Optional
+from typing import Dict
 
 from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
@@ -49,13 +49,13 @@ class CoinListStream(RESTStream):
         """Get the API path for the coins list endpoint."""
         return "/coins/list"
 
-    def get_url_params(
-        self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
-    ) -> Dict[str, Any]:
-        """Return a dictionary of values to be used in URL parameterization."""
-        params: dict = {}
-        params["include_platform"] = "true"
-        return params
+    # def get_url_params(
+    #     self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
+    # ) -> Dict[str, Any]:
+    #     """Return a dictionary of values to be used in URL parameterization."""
+    #     params: dict = {}
+    #     params["include_platform"] = "true"
+    #     return params
 
     def get_request_headers(self) -> Dict[str, str]:
         """Return API request headers based on the API type and key.
