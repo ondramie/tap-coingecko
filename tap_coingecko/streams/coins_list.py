@@ -71,7 +71,5 @@ class CoinListStream(RESTStream):
         if not self.config.get("api_key"):
             raise ValueError("API key is required for authenticated requests.")
 
-        self.logger.info(f"Using API key for {self.config['api_url']} with header '{header_key}'.")
         headers[header_key] = self.config["api_key"]
-
         return headers
