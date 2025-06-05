@@ -13,7 +13,13 @@ from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 
 class CoinCategoriesStream(RESTStream):
-    """Stream for retrieving coin category information from CoinGecko API."""
+    """Stream for retrieving coin category information from CoinGecko API.
+
+    NOTE: hits the /coins/{id} endpoint to get categories for each coin
+    other categories exists:
+     1. https://docs.coingecko.com/reference/categories-list
+     2. https://docs.coingecko.com/reference/coins-categories-list
+    """
 
     name = "coin_categories"
     primary_keys = ["coin_id"]
