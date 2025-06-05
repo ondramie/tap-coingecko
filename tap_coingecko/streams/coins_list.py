@@ -67,7 +67,7 @@ class CoinListStream(RESTStream):
 
         header_key = API_HEADERS.get(self.config["api_url"])
         if not header_key:
-            raise ValueError(f"Invalid API URL: {self.config['api_url']}. ")
+            raise ValueError(f"Invalid API URL: {self.config['api_url']}.")
         if not self.config.get("api_key"):
             raise ValueError("API key is required for authenticated requests.")
 
