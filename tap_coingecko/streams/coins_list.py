@@ -57,19 +57,21 @@ class CoinListStream(RESTStream):
         params["include_platform"] = "true"
         return params
 
-    def get_request_headers(self) -> Dict[str, str]:
-        """Return API request headers based on the API type and key.
+    @property
+    def http_headers(self) -> Dict[str, str]:
+        """Return HTTP headers for requests.
 
-        Returns
-        -------
-        Dict[str, str]
-            A dictionary containing headers to authenticate requests.
-
+        Overrides the default headers to include authentication.
         """
+        headers = super().http_headers.copy()
+
         header_key = API_HEADERS.get(self.config["api_url"])
         if not header_key:
             raise ValueError(f"Invalid API URL: {self.config['api_url']}. ")
         if not self.config.get("api_key"):
             raise ValueError("API key is required for authenticated requests.")
+
         self.logger.info(f"Using API key for {self.config['api_url']} with header '{header_key}'.")
-        return {header_key: self.config["api_key"]}
+        headers[header_key] = self.config["api_key"]
+
+        return headers
