@@ -9,6 +9,8 @@ from tap_coingecko.streams.base import CoingeckoDailyStream
 from tap_coingecko.streams.categories import CoinCategoriesStream
 from tap_coingecko.streams.coins_list import CoinListStream
 from tap_coingecko.streams.hourly import CoingeckoHourlyStream
+from tap_coingecko.streams.asset_profile import AssetProfileStream
+from tap_coingecko.streams.market_intelligence import TrendingStream, DerivativesStream
 
 
 class TapCoingecko(Tap):
@@ -87,5 +89,8 @@ class TapCoingecko(Tap):
             CoingeckoHourlyStream(tap=self),
             CoinCategoriesStream(tap=self),
             CoinListStream(tap=self),
+            AssetProfileStream(tap=self),
+            TrendingStream(tap=self),
+            DerivativesStream(tap=self)
         ]
         return streams
