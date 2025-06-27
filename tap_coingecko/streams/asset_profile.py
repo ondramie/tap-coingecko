@@ -1,13 +1,13 @@
 """Stream for extracting a daily snapshot of comprehensive coin profile data."""
-from typing import Iterable, Optional, Dict, Any, Callable
+from typing import Iterable, Optional, Dict, Any
 import pendulum
 import requests
-import backoff
 
 from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
-from singer_sdk.exceptions import RetriableAPIError, FatalAPIError
+from singer_sdk.exceptions import FatalAPIError
 from tap_coingecko.streams.utils import API_HEADERS, ApiType
+
 
 class AssetProfileStream(RESTStream):
     """
@@ -21,6 +21,8 @@ class AssetProfileStream(RESTStream):
     replication_method = "INCREMENTAL"
     replication_key = "snapshot_date"
     state_partitioning_keys = ["token"]
+    
+    # The path will be formatted for each token during the request cycle.
     path = "/coins/{token}"
 
     @property
@@ -31,17 +33,18 @@ class AssetProfileStream(RESTStream):
             return api_url
         raise ValueError(f"Invalid `api_url` provided: {api_url}")
 
-    def get_request_headers(self) -> Dict[str, str]:
-        """Return HTTP headers for requests, including authentication."""
-        headers = {}
+    @property
+    def http_headers(self) -> dict:
+        """Return the http headers needed, following the paradigm of the original tap."""
+        headers = super().http_headers.copy()
         header_key = API_HEADERS.get(self.config["api_url"])
         api_key = self.config.get("api_key")
 
         if not header_key:
             raise ValueError(f"Invalid API URL in config: {self.config['api_url']}")
-        
+
         if self.config["api_url"] == ApiType.PRO.value and not api_key:
-            self.logger.warning("API key is recommended for the CoinGecko Pro API.")
+            raise ValueError("API key is required for the CoinGecko Pro API.")
         
         if api_key:
             headers[header_key] = api_key
@@ -51,7 +54,10 @@ class AssetProfileStream(RESTStream):
     def get_url_params(
         self, context: Optional[dict], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
-        """Requests specific data panes, avoiding redundant data."""
+        """
+        Requests specific data panes. Market data is enabled to get unique
+        fields like TVL and ROI.
+        """
         return {
             "localization": "false",
             "tickers": "false",
@@ -60,21 +66,11 @@ class AssetProfileStream(RESTStream):
             "developer_data": "true",
             "sparkline": "false"
         }
-
-    def request_decorator(self, func: Callable) -> Callable:
-        """Decorate requests with retry logic."""
-        return backoff.on_exception(
-            backoff.expo,
-            (RetriableAPIError, requests.exceptions.ReadTimeout),
-            max_tries=5,
-            factor=2
-        )(func)
-
-    def request_records(self, context: Optional[dict]) -> Iterable[dict]:
+    
+    def get_records(self, context: Optional[dict]) -> Iterable[Dict[str, Any]]:
         """
-        Request one record for each token, but only if it hasn't already been
-        synced for the current UTC date. This method now correctly uses the
-        parent class's request handling logic.
+        Overrides the default `get_records` to implement the once-per-day logic
+        and iterate through the configured tokens.
         """
         today_str = pendulum.now("UTC").to_date_string()
 
@@ -84,17 +80,24 @@ class AssetProfileStream(RESTStream):
             last_synced_date = stream_state.get("replication_key_value")
 
             if last_synced_date and last_synced_date >= today_str:
-                self.logger.info(f"Skipping '{token_id}': already synced today.")
+                self.logger.info(
+                    f"Skipping '{token_id}' for stream '{self.name}'. "
+                    f"Already synced today ({today_str})."
+                )
                 continue
-
+            
             self.logger.info(f"Fetching daily profile snapshot for '{token_id}'.")
             try:
-                yield from super().request_records(token_context)
+                # The context is passed down to the parent class's logic,
+                # which handles path formatting and making the request.
+                yield from super().get_records(token_context)
             except requests.exceptions.HTTPError as e:
+                # This gracefully handles cases where a specific token is not found (404)
                 if e.response.status_code == 404:
-                    self.logger.warning(f"Token '{token_id}' not found. Skipping.")
-                    continue # Move to the next token
-                raise FatalAPIError(f"Fatal HTTP error for '{token_id}': {e}") from e
+                    self.logger.warning(f"Token '{token_id}' not found on CoinGecko. Skipping.")
+                else:
+                    self.logger.error(f"HTTP error for token '{token_id}': {e}")
+                    raise FatalAPIError(f"Fatal HTTP error for '{token_id}': {e}") from e
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
         """Parses the single record from the response."""
