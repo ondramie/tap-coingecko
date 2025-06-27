@@ -2,9 +2,11 @@
 
 from typing import Iterable, Dict, Optional, Any
 import pendulum
+import requests
+
 from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
-from tap_coingecko.streams.utils import API_HEADERS
+from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 class BaseIntelligenceStream(RESTStream):
     """Base class for streams that capture a timestamped snapshot."""
@@ -14,13 +16,29 @@ class BaseIntelligenceStream(RESTStream):
 
     @property
     def url_base(self) -> str:
-        return self.config["api_url"]
+        """Get the base URL for CoinGecko API requests."""
+        api_url = self.config.get("api_url")
+        if api_url in [ApiType.PRO.value, ApiType.FREE.value]:
+            return api_url
+        raise ValueError(f"Invalid `api_url` provided: {api_url}")
 
-    def get_request_headers(self) -> Dict[str, str]:
+    @property
+    def http_headers(self) -> dict:
+        """Return the http headers needed."""
+        headers = super().http_headers.copy()
         header_key = API_HEADERS.get(self.config["api_url"])
-        if header_key and self.config.get("api_key"):
-            return {header_key: self.config["api_key"]}
-        return {}
+        api_key = self.config.get("api_key")
+
+        if self.config["api_url"] == ApiType.PRO.value and not api_key:
+             self.logger.warning(
+                 "API key is not set for the CoinGecko Pro API. "
+                 "This may lead to authentication errors for certain endpoints."
+             )
+        
+        if header_key and api_key:
+            headers[header_key] = api_key
+            
+        return headers
 
 class TrendingStream(BaseIntelligenceStream):
     """
@@ -40,7 +58,7 @@ class TrendingStream(BaseIntelligenceStream):
         th.Property("score", th.IntegerType, description="Trending rank, 0 is the highest."),
     ).to_dict()
 
-    def parse_response(self, response) -> Iterable[dict]:
+    def parse_response(self, response: requests.Response) -> Iterable[dict]:
         """Denormalizes the API response to create one row per trending coin."""
         snapshot_ts = pendulum.now("UTC").isoformat()
         data = response.json()
