@@ -5,10 +5,4 @@ from tap_coingecko.streams.base import CoingeckoDailyStream
 from tap_coingecko.streams.coins_list import CoinListStream
 from tap_coingecko.streams.hourly import CoingeckoHourlyStream
 
-
-__all__ = [
-    "CoingeckoDailyStream",
-    "CoingeckoHourlyStream",
-    "CoinListStream",
-    "AssetProfileStream"
-]
+__all__ = ["CoingeckoDailyStream", "CoingeckoHourlyStream", "CoinListStream", "AssetProfileStream"]

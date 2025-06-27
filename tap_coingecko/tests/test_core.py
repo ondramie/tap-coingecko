@@ -7,18 +7,17 @@ import warnings
 from typing import Any, Dict
 from unittest.mock import Mock, patch
 
-import pytest
 import pendulum
+import pytest
 import requests
 import singer_sdk.metrics
+from singer_sdk.exceptions import FatalAPIError
 from singer_sdk.testing import get_tap_test_class
 from singer_sdk.testing.config import SuiteConfig
-from singer_sdk.exceptions import FatalAPIError
-from singer_sdk.streams import RESTStream
 
-from tap_coingecko.tap import TapCoingecko
 from tap_coingecko.streams.asset_profile import AssetProfileStream
 from tap_coingecko.streams.utils import ApiType
+from tap_coingecko.tap import TapCoingecko
 
 
 # Patch the problematic logging functions at the module level
@@ -177,7 +176,7 @@ class TestCustomTapCoingecko:
         for record in records:
             context = {"token": record["token"]}
             stream._increment_stream_state(record, context=context)
-        
+
         # The test checks the final state in "bookmarks" for this stream:
         state = stream.tap_state["bookmarks"]["token_price_hr"]
         assert "partitions" in state, f"Expected 'partitions' in state: {state}"
@@ -219,7 +218,7 @@ class TestCustomTapCoingecko:
 
     def test_hourly_request_parameters(self, tap_instance: TapCoingecko) -> None:
         """Test the request parameters for the hourly stream."""
-        import logging 
+        import logging
 
         # Set up logging to be more visible
         logging.basicConfig(level=logging.INFO)
@@ -249,7 +248,7 @@ class TestCustomTapCoingecko:
                 stacklevel=2,
             )
             return
-        
+
         stream = tap_instance.streams["coingecko_token"]
         # Get a single record from the actual API
         records = list(stream.get_records(context={"token": "solana"}))
@@ -283,12 +282,12 @@ class TestCustomTapCoingecko:
         assert "market_cap_rank" in properties
         assert "sentiment_votes_up_percentage" in properties
         assert "developer_forks" in properties
-    
+
         assert properties["id"]["type"] == ["string"]
         assert properties["snapshot_date"]["type"] == ["string"]
         assert properties["market_cap_rank"]["type"] == ["integer", "null"]
         assert properties["developer_forks"]["type"] == ["integer", "null"]
-    
+
     def test_asset_profile_path_property(self, tap_instance: TapCoingecko) -> None:
         """Test the path property for asset_profile stream."""
         stream = tap_instance.streams["asset_profile"]
@@ -306,10 +305,10 @@ class TestCustomTapCoingecko:
             "market_data": "true",
             "community_data": "true",
             "developer_data": "true",
-            "sparkline": "false"
+            "sparkline": "false",
         }
         assert params == expected_params
-        
+
     def test_asset_profile_http_headers(self) -> None:
         """Test request headers for different API configurations for asset_profile."""
         # Test with Pro API and key
@@ -320,7 +319,7 @@ class TestCustomTapCoingecko:
         headers = stream.http_headers
         assert "x-cg-pro-api-key" in headers
         assert headers["x-cg-pro-api-key"] == "test-pro-key"
-        
+
         # Test with Free API and no key
         free_config = get_test_config()
         free_config["api_url"] = ApiType.FREE.value
@@ -339,7 +338,7 @@ class TestCustomTapCoingecko:
         today_str = pendulum.now("UTC").to_date_string()
         context = {"token": "solana"}
         state = {"replication_key_value": today_str}
-        
+
         with patch.object(stream, "get_context_state", return_value=state):
             records = list(stream.get_records(context=context))
             assert len(records) == 0
@@ -352,7 +351,7 @@ class TestCustomTapCoingecko:
         records = list(stream.parse_response(mock_response))
         assert len(records) == 1
         assert records[0]["id"] == "ethereum"
-    
+
     def test_asset_profile_parse_response_invalid_json(self, tap_instance: TapCoingecko) -> None:
         """Test parsing an invalid JSON response."""
         stream = tap_instance.streams["asset_profile"]
@@ -368,16 +367,24 @@ class TestCustomTapCoingecko:
         config["token"] = ["ethereum", "bitcoin", "solana"]
         tap_instance = TapCoingecko(config=config)
         stream = tap_instance.streams["asset_profile"]
-        
-        with patch.object(stream, "get_context_state", return_value={}):
-            with patch("singer_sdk.streams.RESTStream.request_records") as mock_request_records:
-                mock_request_records.side_effect = [[{"id": "ethereum"}], [{"id": "bitcoin"}], [{"id": "solana"}]]
-                # Collect all records by syncing the whole stream
-                records = list(stream.get_records(context=None))
-                # Verify it was called for each token
-                assert mock_request_records.call_count == 3
-                assert len(records) == 3
-    
+
+        # FIX: Combined the two 'with' statements into one line to resolve SIM117.
+        with (
+            patch.object(stream, "get_context_state", return_value={}),
+            patch("singer_sdk.streams.RESTStream.request_records") as mock_request_records,
+        ):
+
+            mock_request_records.side_effect = [
+                [{"id": "ethereum"}],
+                [{"id": "bitcoin"}],
+                [{"id": "solana"}],
+            ]
+            # Collect all records by syncing the whole stream
+            records = list(stream.get_records(context=None))
+            # Verify it was called for each token
+            assert mock_request_records.call_count == 3
+            assert len(records) == 3
+
     def test_asset_profile_request_records_no_tokens(self) -> None:
         """Test get_records with no tokens configured."""
         config = get_test_config()
@@ -391,10 +398,11 @@ class TestCustomTapCoingecko:
         """Test that post_process correctly flattens the API response."""
         stream = tap_instance.streams["asset_profile"]
         raw_record = {
-          "id": "ethereum", "market_cap_rank": 2,
-          "market_data": { "roi": {"times": 29.33, "currency": "btc", "percentage": 2933.73} },
-          "community_data": { "telegram_channel_user_count": 12345 },
-          "developer_data": { "forks": 19618 }
+            "id": "ethereum",
+            "market_cap_rank": 2,
+            "market_data": {"roi": {"times": 29.33, "currency": "btc", "percentage": 2933.73}},
+            "community_data": {"telegram_channel_user_count": 12345},
+            "developer_data": {"forks": 19618},
         }
         processed = stream.post_process(raw_record, context={})
         assert processed["market_cap_rank"] == 2
@@ -410,13 +418,13 @@ class TestCustomTapCoingecko:
         stream = tap_instance.streams["asset_profile"]
 
         http_404_error = requests.exceptions.HTTPError(response=Mock(status_code=404))
-        
+
         with patch(
             "singer_sdk.streams.RESTStream.get_records",
-            side_effect=[http_404_error, [{"id": "ethereum"}]]
+            side_effect=[http_404_error, [{"id": "ethereum"}]],
         ) as mock_sync:
             records = list(stream.get_records(context=None))
-            
+
             assert mock_sync.call_count == 2
             assert len(records) == 1
             assert records[0]["id"] == "ethereum"

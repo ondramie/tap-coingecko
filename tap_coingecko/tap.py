@@ -86,6 +86,6 @@ class TapCoingecko(Tap):
             CoingeckoDailyStream(tap=self),
             CoingeckoHourlyStream(tap=self),
             CoinListStream(tap=self),
-            AssetProfileStream(tap=self)
+            AssetProfileStream(tap=self),
         ]
         return streams
