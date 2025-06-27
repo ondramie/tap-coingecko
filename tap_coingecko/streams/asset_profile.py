@@ -1,18 +1,19 @@
-
 """Stream for extracting a daily snapshot of comprehensive coin profile data."""
-
-from typing import Iterable, Optional, Dict, Any
+from typing import Iterable, Optional, Dict, Any, Callable
 import pendulum
+import requests
+import backoff
 
 from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
-from tap_coingecko.streams.utils import API_HEADERS
+from singer_sdk.exceptions import RetriableAPIError, FatalAPIError
+from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 class AssetProfileStream(RESTStream):
     """
     Stream for retrieving a daily snapshot of an asset's core profile.
     This stream is designed to be run frequently, but it will only capture data
-    ONCE PER DAY per token. It is the source for all current social
+    ONCE PER DAY per token. It is the definitive source for all current social
     media stats, proprietary CoinGecko scores, and unique metadata.
     """
     name = "asset_profile"
@@ -20,22 +21,42 @@ class AssetProfileStream(RESTStream):
     replication_method = "INCREMENTAL"
     replication_key = "snapshot_date"
     state_partitioning_keys = ["token"]
+    
+    # The path will be formatted for each token during the request cycle.
     path = "/coins/{token}"
 
     @property
     def url_base(self) -> str:
-        return self.config["api_url"]
+        """Get the base URL for CoinGecko API requests."""
+        api_url = self.config.get("api_url")
+        if api_url in [ApiType.PRO.value, ApiType.FREE.value]:
+            return api_url
+        raise ValueError(f"Invalid `api_url` provided: {api_url}")
 
     def get_request_headers(self) -> Dict[str, str]:
+        """Return HTTP headers for requests, including authentication."""
+        headers = {}
         header_key = API_HEADERS.get(self.config["api_url"])
-        if header_key and self.config.get("api_key"):
-            return {header_key: self.config["api_key"]}
-        return {}
+        api_key = self.config.get("api_key")
 
-    def get_url_params(self, context: Optional[dict], next_page_token: Optional[Any]) -> Dict[str, Any]:
+        if not header_key:
+            raise ValueError(f"Invalid API URL in config: {self.config['api_url']}")
+
+        # Pro API requires a key.
+        if self.config["api_url"] == ApiType.PRO.value and not api_key:
+            raise ValueError("API key is required for the CoinGecko Pro API.")
+        
+        if api_key:
+            headers[header_key] = api_key
+            
+        return headers
+
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any]
+    ) -> Dict[str, Any]:
         """
-        Requests specific data panes. Market data is enabled to get unique
-        fields like TVL and ROI.
+        Requests specific data panes but explicitly EXCLUDES market_data to
+        avoid redundancy with the historical coingecko_token stream.
         """
         return {
             "localization": "false",
@@ -45,11 +66,23 @@ class AssetProfileStream(RESTStream):
             "developer_data": "true",
             "sparkline": "false"
         }
-    
+
+    def request_decorator(self, func: Callable) -> Callable:
+        """Decorate requests with retry logic."""
+        return backoff.on_exception(
+            backoff.expo,
+            (RetriableAPIError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError),
+            max_tries=5,
+            factor=2,
+            on_giveup=lambda details: self.logger.error(
+                f"Gave up after {details['tries']} tries calling {details['target'].__name__}"
+            )
+        )(func)
+
     def request_records(self, context: Optional[dict]) -> Iterable[dict]:
         """
         Request one record for each token, but only if it hasn't already been
-        synced for the current UTC date, enforcing daily granularity.
+        synced for the current UTC date.
         """
         today_str = pendulum.now("UTC").to_date_string()
 
@@ -66,22 +99,41 @@ class AssetProfileStream(RESTStream):
                 continue
 
             self.logger.info(f"Fetching daily profile snapshot for '{token_id}'.")
-            yield from super().request_records(token_context)
-    
+            decorated_request = self.request_decorator(self._request)
+            
+            # Prepare a single request for this token
+            prepared_request = self.prepare_request(context=token_context)
+            try:
+                response = decorated_request(prepared_request, token_context)
+                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                yield from self.parse_response(response)
+            except requests.exceptions.HTTPError as e:
+                self.logger.error(f"HTTP error for token '{token_id}': {e}")
+                # Decide if this should be fatal or just a skip
+                # For a 404 (Not Found), we can safely skip.
+                if e.response.status_code == 404:
+                    self.logger.warning(f"Token '{token_id}' not found on CoinGecko. Skipping.")
+                else:
+                    # For other errors (like 401, 403, 500), it might be a fatal issue
+                    raise FatalAPIError(f"Fatal HTTP error for token '{token_id}': {e}") from e
+
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Parses the single record from the response."""
-        yield response.json()
+        """Parses the single record from the response, with robust JSON handling."""
+        try:
+            yield response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            self.logger.error(f"Error decoding JSON from response: {response.text}")
+            raise FatalAPIError("Received non-JSON response from API.") from e
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
         """
         Transforms the raw, nested API response into a flattened, structured record
-        and injects the snapshot_date.
+        and injects the snapshot_date. It defensively accesses nested data.
         """
-        market_data = row.get("market_data", {})
-        community_data = row.get("community_data", {})
-        developer_data = row.get("developer_data", {})
+        market_data = row.get("market_data", {}) or {}
+        community_data = row.get("community_data", {}) or {}
+        developer_data = row.get("developer_data", {}) or {}
 
-        # Flatten the nested ROI object
         roi_data = market_data.get("roi")
         roi = {
             "times": roi_data.get("times"),
@@ -95,7 +147,7 @@ class AssetProfileStream(RESTStream):
             "symbol": row.get("symbol"),
             "name": row.get("name"),
             "categories": row.get("categories"),
-            "description": row.get("description", {}).get("en"), # Extract English description
+            "description": row.get("description", {}).get("en"),
             "links": row.get("links"),
             "market_cap_rank": row.get("market_cap_rank"),
             "country_origin": row.get("country_origin"),
