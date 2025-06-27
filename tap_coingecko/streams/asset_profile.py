@@ -13,7 +13,7 @@ class AssetProfileStream(RESTStream):
     """
     Stream for retrieving a daily snapshot of an asset's core profile.
     This stream is designed to be run frequently, but it will only capture data
-    ONCE PER DAY per token. It is the definitive source for all current social
+    ONCE PER DAY per token. It is the source for all current social
     media stats, proprietary CoinGecko scores, and unique metadata.
     """
     name = "asset_profile"
@@ -21,8 +21,6 @@ class AssetProfileStream(RESTStream):
     replication_method = "INCREMENTAL"
     replication_key = "snapshot_date"
     state_partitioning_keys = ["token"]
-    
-    # The path will be formatted for each token during the request cycle.
     path = "/coins/{token}"
 
     @property
@@ -41,10 +39,9 @@ class AssetProfileStream(RESTStream):
 
         if not header_key:
             raise ValueError(f"Invalid API URL in config: {self.config['api_url']}")
-
-        # Pro API requires a key.
+        
         if self.config["api_url"] == ApiType.PRO.value and not api_key:
-            raise ValueError("API key is required for the CoinGecko Pro API.")
+            self.logger.warning("API key is recommended for the CoinGecko Pro API.")
         
         if api_key:
             headers[header_key] = api_key
@@ -54,10 +51,7 @@ class AssetProfileStream(RESTStream):
     def get_url_params(
         self, context: Optional[dict], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
-        """
-        Requests specific data panes but explicitly EXCLUDES market_data to
-        avoid redundancy with the historical coingecko_token stream.
-        """
+        """Requests specific data panes, avoiding redundant data."""
         return {
             "localization": "false",
             "tickers": "false",
@@ -71,18 +65,16 @@ class AssetProfileStream(RESTStream):
         """Decorate requests with retry logic."""
         return backoff.on_exception(
             backoff.expo,
-            (RetriableAPIError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError),
+            (RetriableAPIError, requests.exceptions.ReadTimeout),
             max_tries=5,
-            factor=2,
-            on_giveup=lambda details: self.logger.error(
-                f"Gave up after {details['tries']} tries calling {details['target'].__name__}"
-            )
+            factor=2
         )(func)
 
     def request_records(self, context: Optional[dict]) -> Iterable[dict]:
         """
         Request one record for each token, but only if it hasn't already been
-        synced for the current UTC date.
+        synced for the current UTC date. This method now correctly uses the
+        parent class's request handling logic.
         """
         today_str = pendulum.now("UTC").to_date_string()
 
@@ -92,38 +84,26 @@ class AssetProfileStream(RESTStream):
             last_synced_date = stream_state.get("replication_key_value")
 
             if last_synced_date and last_synced_date >= today_str:
-                self.logger.info(
-                    f"Skipping '{token_id}' for stream '{self.name}'. "
-                    f"Already synced today ({today_str})."
-                )
+                self.logger.info(f"Skipping '{token_id}': already synced today.")
                 continue
 
             self.logger.info(f"Fetching daily profile snapshot for '{token_id}'.")
-            decorated_request = self.request_decorator(self._request)
-            
-            # Prepare a single request for this token
-            prepared_request = self.prepare_request(context=token_context)
             try:
-                response = decorated_request(prepared_request, token_context)
-                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-                yield from self.parse_response(response)
+                yield from super().request_records(token_context)
             except requests.exceptions.HTTPError as e:
-                self.logger.error(f"HTTP error for token '{token_id}': {e}")
-                # Decide if this should be fatal or just a skip
-                # For a 404 (Not Found), we can safely skip.
                 if e.response.status_code == 404:
-                    self.logger.warning(f"Token '{token_id}' not found on CoinGecko. Skipping.")
-                else:
-                    # For other errors (like 401, 403, 500), it might be a fatal issue
-                    raise FatalAPIError(f"Fatal HTTP error for token '{token_id}': {e}") from e
+                    self.logger.warning(f"Token '{token_id}' not found. Skipping.")
+                    continue # Move to the next token
+                raise FatalAPIError(f"Fatal HTTP error for '{token_id}': {e}") from e
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Parses the single record from the response, with robust JSON handling."""
+        """Parses the single record from the response."""
         try:
             yield response.json()
         except requests.exceptions.JSONDecodeError as e:
-            self.logger.error(f"Error decoding JSON from response: {response.text}")
-            raise FatalAPIError("Received non-JSON response from API.") from e
+            msg = f"Error decoding JSON from response: {response.text}"
+            self.logger.error(msg)
+            raise FatalAPIError(msg) from e
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
         """
@@ -133,13 +113,7 @@ class AssetProfileStream(RESTStream):
         market_data = row.get("market_data", {}) or {}
         community_data = row.get("community_data", {}) or {}
         developer_data = row.get("developer_data", {}) or {}
-
         roi_data = market_data.get("roi")
-        roi = {
-            "times": roi_data.get("times"),
-            "currency": roi_data.get("currency"),
-            "percentage": roi_data.get("percentage"),
-        } if roi_data else None
 
         return {
             "snapshot_date": pendulum.now("UTC").to_date_string(),
@@ -162,7 +136,9 @@ class AssetProfileStream(RESTStream):
             "total_value_locked": market_data.get("total_value_locked"),
             "mcap_to_tvl_ratio": market_data.get("mcap_to_tvl_ratio"),
             "fdv_to_tvl_ratio": market_data.get("fdv_to_tvl_ratio"),
-            "roi": roi,
+            "roi_times": roi_data.get("times") if roi_data else None,
+            "roi_currency": roi_data.get("currency") if roi_data else None,
+            "roi_percentage": roi_data.get("percentage") if roi_data else None,
             "community_data_facebook_likes": community_data.get("facebook_likes"),
             "community_data_twitter_followers": community_data.get("twitter_followers"),
             "community_data_reddit_subscribers": community_data.get("reddit_subscribers"),
@@ -194,11 +170,9 @@ class AssetProfileStream(RESTStream):
         th.Property("total_value_locked", th.NumberType),
         th.Property("mcap_to_tvl_ratio", th.NumberType),
         th.Property("fdv_to_tvl_ratio", th.NumberType),
-        th.Property("roi", th.ObjectType(
-            th.Property("times", th.NumberType),
-            th.Property("currency", th.StringType),
-            th.Property("percentage", th.NumberType),
-        )),
+        th.Property("roi_times", th.NumberType),
+        th.Property("roi_currency", th.StringType),
+        th.Property("roi_percentage", th.NumberType),
         th.Property("community_data_facebook_likes", th.IntegerType),
         th.Property("community_data_twitter_followers", th.IntegerType),
         th.Property("community_data_reddit_subscribers", th.IntegerType),
