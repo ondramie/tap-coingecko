@@ -8,9 +8,7 @@ from singer_sdk import typing as th  # JSON schema typing helpers
 from tap_coingecko.streams.asset_profile import AssetProfileStream
 from tap_coingecko.streams.base import CoingeckoDailyStream
 from tap_coingecko.streams.coins_list import CoinListStream
-from tap_coingecko.streams.discovery import NewlyListedStream, TopMoversStream
 from tap_coingecko.streams.hourly import CoingeckoHourlyStream
-from tap_coingecko.streams.market_intelligence import DerivativesSentimentStream, TrendingStream
 
 
 class TapCoingecko(Tap):
@@ -88,10 +86,6 @@ class TapCoingecko(Tap):
             CoingeckoDailyStream(tap=self),
             CoingeckoHourlyStream(tap=self),
             CoinListStream(tap=self),
-            AssetProfileStream(tap=self),
-            TrendingStream(tap=self),
-            DerivativesSentimentStream(tap=self),
-            TopMoversStream(tap=self),
-            NewlyListedStream(tap=self),
+            AssetProfileStream(tap=self)
         ]
         return streams

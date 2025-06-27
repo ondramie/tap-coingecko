@@ -91,8 +91,14 @@ class AssetProfileStream(RESTStream):
                     raise FatalAPIError(f"Fatal HTTP error for '{token_id}': {e}") from e
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Parses the single record from the response."""
-        yield response.json()
+        """
+        Parses the single record from the response.
+        FIX: Added error handling for invalid JSON.
+        """
+        try:
+            yield response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            raise FatalAPIError(f"Error decoding JSON from response: {response.text}") from e
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
         """
