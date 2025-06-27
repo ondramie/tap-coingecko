@@ -72,7 +72,7 @@ def get_test_config() -> dict:
     """Return test config with API key from environment."""
     config = SAMPLE_CONFIG.copy()
 
-    #Get API key from environment variable
+    # Get API key from environment variable
     api_key = os.getenv("TAP_COINGECKO_API_KEY")
 
     if api_key:
@@ -80,7 +80,7 @@ def get_test_config() -> dict:
     else:
         # For CI/CD, you might want to use a dummy key or skip tests
         config["api_key"] = "dummy-key-for-testing"
-        print("Warning: No API key found in environment. Running tests against free API.")
+        print("Warning: No API key found in environment. Using dummy key for testing.")
 
     return config
 
@@ -88,6 +88,7 @@ def get_test_config() -> dict:
 # Define test suite configuration
 suite_config = SuiteConfig(
     max_records_limit=500,
+    # ignore_no_records_for_streams=["coingecko_token_hourly"],
 )
 
 # Run standard built-in tap tests from the SDK:
@@ -167,9 +168,9 @@ class TestCustomTapCoingecko:
         # 2025-01-05 -> 1736035200
         # 2025-01-06 -> 1736121600
         records = [
-            {"timestamp": 1736035200, "token": "ethereum", "data": "test1"},
-            {"timestamp": 1735948800, "token": "bitcoin", "data": "test2"},
-            {"timestamp": 1736121600, "token": "ethereum", "data": "test3"},
+            {"timestamp": 1736035200, "token": "ethereum", "data": "test1"},  # 2025-01-05
+            {"timestamp": 1735948800, "token": "bitcoin", "data": "test2"},  # 2025-01-04
+            {"timestamp": 1736121600, "token": "ethereum", "data": "test3"},  # 2025-01-06
         ]
 
         # Simulate record processing and state updates:
@@ -309,10 +310,8 @@ class TestCustomTapCoingecko:
         }
         assert params == expected_params
         
-    def test_asset_profile_http_headers(self, tap_instance: TapCoingecko) -> None:
+    def test_asset_profile_http_headers(self) -> None:
         """Test request headers for different API configurations for asset_profile."""
-        config = tap_instance.config
-        
         # Test with Pro API and key
         pro_config = get_test_config()
         pro_config["api_url"] = ApiType.PRO.value
@@ -330,7 +329,7 @@ class TestCustomTapCoingecko:
         headers = stream.http_headers
         assert "x-cg-pro-api-key" not in headers
 
-    def test_asset_profile_once_per_day_logic(self, tap_instance: TapCoingecko) -> None:
+    def test_asset_profile_once_per_day_logic(self) -> None:
         """Test that the asset_profile stream's once-per-day logic works."""
         config = get_test_config()
         config["token"] = ["solana"]
@@ -363,27 +362,28 @@ class TestCustomTapCoingecko:
         with pytest.raises(FatalAPIError, match="Error decoding JSON from response"):
             list(stream.parse_response(mock_response))
 
-    def test_asset_profile_get_records_multiple_tokens(self, tap_instance: TapCoingecko) -> None:
+    def test_asset_profile_get_records_multiple_tokens(self) -> None:
         """Test that get_records processes all configured tokens."""
         config = get_test_config()
         config["token"] = ["ethereum", "bitcoin", "solana"]
-        stream = AssetProfileStream(tap=TapCoingecko(config=config))
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
         
         with patch.object(stream, "get_context_state", return_value={}):
-            with patch.object(RESTStream, "get_records") as mock_get_records:
-                # Simulate it returning one item per call
-                mock_get_records.side_effect = [[{"id": "ethereum"}], [{"id": "bitcoin"}], [{"id": "solana"}]]
-                # Collect all records
+            with patch("singer_sdk.streams.RESTStream.request_records") as mock_request_records:
+                mock_request_records.side_effect = [[{"id": "ethereum"}], [{"id": "bitcoin"}], [{"id": "solana"}]]
+                # Collect all records by syncing the whole stream
                 records = list(stream.get_records(context=None))
                 # Verify it was called for each token
-                assert mock_get_records.call_count == 3
+                assert mock_request_records.call_count == 3
                 assert len(records) == 3
     
-    def test_asset_profile_request_records_no_tokens(self, tap_instance: TapCoingecko) -> None:
+    def test_asset_profile_request_records_no_tokens(self) -> None:
         """Test get_records with no tokens configured."""
         config = get_test_config()
         config["token"] = []
-        stream = AssetProfileStream(tap=TapCoingecko(config=config))
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
         records = list(stream.get_records(context=None))
         assert len(records) == 0
 
@@ -396,7 +396,7 @@ class TestCustomTapCoingecko:
           "community_data": { "telegram_channel_user_count": 12345 },
           "developer_data": { "forks": 19618 }
         }
-        processed = stream.post_process(raw_record)
+        processed = stream.post_process(raw_record, context={})
         assert processed["market_cap_rank"] == 2
         assert processed["roi_times"] == 29.33
         assert processed["developer_forks"] == 19618
