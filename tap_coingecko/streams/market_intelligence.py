@@ -1,15 +1,18 @@
 """Streams for unique, non-overlapping market intelligence data."""
 
-from typing import Iterable, Dict, Optional, Any
+from typing import Any, Dict, Iterable, Optional
+
 import pendulum
 import requests
-
 from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
+
 from tap_coingecko.streams.utils import API_HEADERS, ApiType
+
 
 class BaseIntelligenceStream(RESTStream):
     """Base class for streams that capture a timestamped snapshot."""
+
     replication_method = "INCREMENTAL"
     replication_key = "snapshot_timestamp"
     is_sorted = False
@@ -24,27 +27,29 @@ class BaseIntelligenceStream(RESTStream):
 
     @property
     def http_headers(self) -> dict:
-        """Return the http headers needed."""
+        """Return the http headers needed, following the required paradigm."""
         headers = super().http_headers.copy()
         header_key = API_HEADERS.get(self.config["api_url"])
         api_key = self.config.get("api_key")
 
         if self.config["api_url"] == ApiType.PRO.value and not api_key:
-             self.logger.warning(
-                 "API key is not set for the CoinGecko Pro API. "
-                 "This may lead to authentication errors for certain endpoints."
-             )
-        
+            self.logger.warning(
+                "API key is not set for the CoinGecko Pro API. "
+                "This may lead to authentication errors for certain endpoints."
+            )
+
         if header_key and api_key:
             headers[header_key] = api_key
-            
+
         return headers
+
 
 class TrendingStream(BaseIntelligenceStream):
     """
     Stream for retrieving trending coins. Captures short-term market focus
     and is crucial for marketing intelligence.
     """
+
     name = "trending"
     path = "/search/trending"
     primary_keys = ["snapshot_timestamp", "coin_id"]
@@ -73,12 +78,14 @@ class TrendingStream(BaseIntelligenceStream):
                 "score": i,
             }
 
-class DerivativesStream(BaseIntelligenceStream):
+
+class DerivativesSentimentStream(BaseIntelligenceStream):
     """
     Stream for retrieving derivatives tickers. Captures pro-level sentiment
     data like funding rates, giving users a competitive trading edge.
     """
-    name = "derivatives_tickers"
+
+    name = "derivatives_sentiment"
     primary_keys = ["snapshot_timestamp", "market", "symbol"]
     path = "/derivatives"
 
@@ -87,14 +94,21 @@ class DerivativesStream(BaseIntelligenceStream):
         th.Property("market", th.StringType),
         th.Property("symbol", th.StringType),
         th.Property("price", th.StringType),
+        th.Property("price_percentage_change_24h", th.NumberType),
         th.Property("contract_type", th.StringType),
+        th.Property("index", th.NumberType),
+        th.Property("basis", th.NumberType),
+        th.Property("spread", th.NumberType),
         th.Property("funding_rate", th.NumberType),
         th.Property("open_interest", th.NumberType),
         th.Property("volume_24h", th.NumberType),
     ).to_dict()
 
-    def get_url_params(self, context: Optional[dict], next_page_token: Optional[Any]) -> Dict[str, Any]:
-        return {"include_tickers": "all"}
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any]
+    ) -> Dict[str, Any]:
+        # 'unexpired' is more efficient as it excludes settled contracts.
+        return {"include_tickers": "unexpired"}
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
         """Injects the ingestion timestamp into each derivatives record."""
