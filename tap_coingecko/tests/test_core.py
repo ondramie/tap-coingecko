@@ -373,7 +373,6 @@ class TestCustomTapCoingecko:
             patch.object(stream, "get_context_state", return_value={}),
             patch("singer_sdk.streams.RESTStream.request_records") as mock_request_records,
         ):
-
             mock_request_records.side_effect = [
                 [{"id": "ethereum"}],
                 [{"id": "bitcoin"}],
