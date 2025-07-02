@@ -5,12 +5,18 @@ import logging.config
 import os
 import warnings
 from typing import Any, Dict
+from unittest.mock import Mock, patch
 
+import pendulum
 import pytest
+import requests
 import singer_sdk.metrics
+from singer_sdk.exceptions import FatalAPIError
 from singer_sdk.testing import get_tap_test_class
 from singer_sdk.testing.config import SuiteConfig
 
+from tap_coingecko.streams.asset_profile import AssetProfileStream
+from tap_coingecko.streams.utils import ApiType
 from tap_coingecko.tap import TapCoingecko
 
 
@@ -142,7 +148,8 @@ class TestCustomTapCoingecko:
         assert btc_partition["progress_markers"]["replication_key_value"] == "2025-01-04"
 
     def test_state_per_token_hourly(self, tap_instance: TapCoingecko) -> None:
-        """Test that state is properly managed per token for the hourly stream."""
+        """Test that state is properly managed per token for the hourly
+        stream."""
         # If the hourly stream doesn't exist, warn and skip rather than fail:
         if "token_price_hr" not in tap_instance.streams:
             warnings.warn(
@@ -255,315 +262,170 @@ class TestCustomTapCoingecko:
         assert isinstance(record["price_usd"], (float, type(None)))
         assert isinstance(record["market_cap_usd"], (float, type(None)))
 
-    def test_categories_stream_configuration(self, tap_instance: TapCoingecko) -> None:
-        """Test that categories stream is properly configured."""
-        tap = tap_instance
+    def test_asset_profile_stream_configuration(self, tap_instance: TapCoingecko) -> None:
+        """Test that asset_profile stream is properly configured."""
+        assert "asset_profile" in tap_instance.streams
+        stream = tap_instance.streams["asset_profile"]
+        assert stream.name == "asset_profile"
+        assert stream.primary_keys == ["id", "snapshot_date"]
+        assert stream.replication_method == "INCREMENTAL"
+        assert stream.replication_key == "snapshot_date"
 
-        # Check that the categories stream is registered
-        assert "coin_categories" in tap.streams
-
-        # Get the categories stream
-        categories_stream = tap.streams["coin_categories"]
-
-        # Test basic configuration
-        assert categories_stream.name == "coin_categories"
-        assert categories_stream.primary_keys == ["coin_id"]
-        assert categories_stream.replication_method == "FULL_TABLE"
-        assert (
-            not hasattr(categories_stream, "replication_key")
-            or categories_stream.replication_key is None
-        )
-
-        # Test schema structure
-        schema = categories_stream.schema
+    def test_asset_profile_schema_structure(self, tap_instance: TapCoingecko) -> None:
+        """Test the schema structure of the asset_profile stream."""
+        stream = tap_instance.streams["asset_profile"]
+        schema = stream.schema
         assert "properties" in schema
         properties = schema["properties"]
 
-        # Verify required fields exist in schema
-        assert "coin_id" in properties
-        assert "name" in properties
-        assert "symbol" in properties
-        assert "categories" in properties
+        assert "id" in properties
+        assert "snapshot_date" in properties
+        assert "market_cap_rank" in properties
+        assert "sentiment_votes_up_percentage" in properties
+        assert "developer_forks" in properties
 
-        # Verify field types - JSON Schema types are arrays in Singer schemas
-        assert "string" in properties["coin_id"]["type"]
-        assert "string" in properties["name"]["type"]
-        assert "string" in properties["symbol"]["type"]
-        assert "array" in properties["categories"]["type"]
+        assert properties["id"]["type"] == ["string"]
+        assert properties["snapshot_date"]["type"] == ["string"]
+        assert properties["market_cap_rank"]["type"] == ["integer", "null"]
+        assert properties["developer_forks"]["type"] == ["integer", "null"]
 
-    def test_categories_stream_path_property(self, tap_instance: TapCoingecko) -> None:
-        """Test the path property for categories stream."""
-        categories_stream = tap_instance.streams["coin_categories"]
+    def test_asset_profile_path_property(self, tap_instance: TapCoingecko) -> None:
+        """Test the path property for asset_profile stream."""
+        stream = tap_instance.streams["asset_profile"]
+        context = {"token": "ethereum"}
+        request = stream.prepare_request(context, next_page_token=None)
+        assert "/coins/ethereum" in request.url
 
-        # Test that accessing path without setting current_token raises an error
-        with pytest.raises(ValueError, match="No token has been set"):
-            _ = categories_stream.path
-
-        # Test path with valid token
-        categories_stream.current_token = "ethereum"
-        assert categories_stream.path == "/coins/ethereum"
-
-        categories_stream.current_token = "bitcoin"
-        assert categories_stream.path == "/coins/bitcoin"
-
-    def test_categories_stream_url_base_property(self, tap_instance: TapCoingecko) -> None:
-        """Test the url_base property for different API configurations."""
-        from tap_coingecko.streams.categories import CoinCategoriesStream
-
-        # Test with free API
-        config = get_test_config()
-        config["api_url"] = "https://api.coingecko.com/api/v3"
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        assert stream.url_base == "https://api.coingecko.com/api/v3"
-
-        # Test with pro API
-        config = get_test_config()
-        config["api_url"] = "https://pro-api.coingecko.com/api/v3"
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        assert stream.url_base == "https://pro-api.coingecko.com/api/v3"
-
-        # Test with invalid API URL
-        config = get_test_config()
-        config["api_url"] = "https://invalid-api.com"
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        with pytest.raises(ValueError, match="Invalid API URL"):
-            _ = stream.url_base
-
-    def test_categories_stream_headers(self, tap_instance: TapCoingecko) -> None:
-        """Test request headers for different API configurations."""
-        from tap_coingecko.streams.categories import CoinCategoriesStream
-
-        # Test headers with empty API key (free API)
-        config = get_test_config()
-        config["api_url"] = "https://api.coingecko.com/api/v3"
-        config["api_key"] = ""  # Empty string instead of None
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        headers = stream.get_request_headers()
-        assert headers == {}
-
-        # Test headers with API key (free API)
-        config = get_test_config()
-        config["api_url"] = "https://api.coingecko.com/api/v3"
-        config["api_key"] = "test-demo-key"
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        headers = stream.get_request_headers()
-        assert headers == {"x-cg-demo-api-key": "test-demo-key"}
-
-        # Test headers with API key (pro API)
-        config = get_test_config()
-        config["api_url"] = "https://pro-api.coingecko.com/api/v3"
-        config["api_key"] = "test-pro-key"
-        stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        headers = stream.get_request_headers()
-        assert headers == {"x-cg-pro-api-key": "test-pro-key"}
-
-    def test_categories_parse_response_valid_data(self, tap_instance: TapCoingecko) -> None:
-        """Test parsing a valid API response."""
-        from unittest.mock import Mock
-
-        categories_stream = tap_instance.streams["coin_categories"]
-        categories_stream.current_token = "ethereum"
-
-        # Mock a valid response
-        mock_response = Mock()
-        mock_response.json.return_value = {
-            "id": "ethereum",
-            "name": "Ethereum",
-            "symbol": "eth",
-            "categories": ["Smart Contract Platform", "Ethereum Ecosystem"],
+    def test_asset_profile_get_url_params(self, tap_instance: TapCoingecko) -> None:
+        """Test URL params for asset_profile stream."""
+        stream = tap_instance.streams["asset_profile"]
+        params = stream.get_url_params(context=None, next_page_token=None)
+        expected_params = {
+            "localization": "false",
+            "tickers": "false",
+            "market_data": "true",
+            "community_data": "true",
+            "developer_data": "true",
+            "sparkline": "false",
         }
-        mock_response.status_code = 200
-        mock_response.url = "https://api.coingecko.com/api/v3/coins/ethereum"
+        assert params == expected_params
 
-        # Parse the response
-        records = list(categories_stream.parse_response(mock_response))
+    def test_asset_profile_http_headers(self) -> None:
+        """Test request headers for different API configurations for
+        asset_profile."""
+        # Test with Pro API and key
+        pro_config = get_test_config()
+        pro_config["api_url"] = ApiType.PRO.value
+        pro_config["api_key"] = "test-pro-key"
+        stream = AssetProfileStream(tap=TapCoingecko(config=pro_config))
+        headers = stream.http_headers
+        assert "x-cg-pro-api-key" in headers
+        assert headers["x-cg-pro-api-key"] == "test-pro-key"
 
-        # Verify the parsed record
-        assert len(records) == 1
-        record = records[0]
-        assert record["coin_id"] == "ethereum"
-        assert record["name"] == "Ethereum"
-        assert record["symbol"] == "eth"
-        assert record["categories"] == ["Smart Contract Platform", "Ethereum Ecosystem"]
+        # Test with Free API and no key
+        free_config = get_test_config()
+        free_config["api_url"] = ApiType.FREE.value
+        free_config["api_key"] = ""
+        stream = AssetProfileStream(tap=TapCoingecko(config=free_config))
+        headers = stream.http_headers
+        assert "x-cg-pro-api-key" not in headers
 
-    def test_categories_parse_response_missing_id(self, tap_instance: TapCoingecko) -> None:
-        """Test parsing response with missing ID field."""
-        from unittest.mock import Mock
+    def test_asset_profile_once_per_day_logic(self) -> None:
+        """Test that the asset_profile stream's once-per-day logic works."""
+        config = get_test_config()
+        config["token"] = ["solana"]
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
 
-        categories_stream = tap_instance.streams["coin_categories"]
-        categories_stream.current_token = "ethereum"
+        today_str = pendulum.now("UTC").to_date_string()
+        context = {"token": "solana"}
+        state = {"replication_key_value": today_str}
 
-        # Mock response missing 'id' field
+        with patch.object(stream, "get_context_state", return_value=state):
+            records = list(stream.get_records(context=context))
+            assert len(records) == 0
+
+    def test_asset_profile_parse_response_valid_data(self, tap_instance: TapCoingecko) -> None:
+        """Test parsing a valid API response for asset_profile."""
+        stream = tap_instance.streams["asset_profile"]
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "name": "Ethereum",
-            "symbol": "eth",
-            "categories": ["Smart Contract Platform"],
-        }
-        mock_response.status_code = 200
-        mock_response.url = "https://api.coingecko.com/api/v3/coins/ethereum"
-
-        # Parse the response
-        records = list(categories_stream.parse_response(mock_response))
-
-        # Should use current_token as coin_id when id is missing
+        mock_response.json.return_value = {"id": "ethereum", "name": "Ethereum"}
+        records = list(stream.parse_response(mock_response))
         assert len(records) == 1
-        record = records[0]
-        assert record["coin_id"] == "ethereum"
-        assert record["name"] == "Ethereum"
+        assert records[0]["id"] == "ethereum"
 
-    def test_categories_parse_response_invalid_json(self, tap_instance: TapCoingecko) -> None:
-        """Test parsing response with invalid JSON."""
-        from unittest.mock import Mock
-
-        import requests
-        from singer_sdk.exceptions import FatalAPIError
-
-        categories_stream = tap_instance.streams["coin_categories"]
-        categories_stream.current_token = "ethereum"
-
-        # Mock response with invalid JSON
+    def test_asset_profile_parse_response_invalid_json(self, tap_instance: TapCoingecko) -> None:
+        """Test parsing an invalid JSON response."""
+        stream = tap_instance.streams["asset_profile"]
         mock_response = Mock()
         mock_response.json.side_effect = requests.exceptions.JSONDecodeError("Invalid JSON", "", 0)
-        mock_response.status_code = 200
-        mock_response.url = "https://api.coingecko.com/api/v3/coins/ethereum"
-        mock_response.text = "Invalid JSON response"
+        mock_response.text = "Invalid JSON"
+        with pytest.raises(FatalAPIError, match="Error decoding JSON from response"):
+            list(stream.parse_response(mock_response))
 
-        # Should raise FatalAPIError for invalid JSON
-        with pytest.raises(FatalAPIError, match="Failed to decode JSON response"):
-            list(categories_stream.parse_response(mock_response))
-
-    def test_categories_parse_response_empty_categories(self, tap_instance: TapCoingecko) -> None:
-        """Test parsing response with missing or empty categories field."""
-        from unittest.mock import Mock
-
-        categories_stream = tap_instance.streams["coin_categories"]
-        categories_stream.current_token = "bitcoin"
-
-        # Mock response without categories field
-        mock_response = Mock()
-        mock_response.json.return_value = {"id": "bitcoin", "name": "Bitcoin", "symbol": "btc"}
-        mock_response.status_code = 200
-        mock_response.url = "https://api.coingecko.com/api/v3/coins/bitcoin"
-
-        # Parse the response
-        records = list(categories_stream.parse_response(mock_response))
-
-        # Should default to empty list for categories
-        assert len(records) == 1
-        record = records[0]
-        assert record["coin_id"] == "bitcoin"
-        assert record["categories"] == []
-
-    def test_categories_request_records_multiple_tokens(self, tap_instance: TapCoingecko) -> None:
-        """Test that request_records processes all configured tokens."""
-        from unittest.mock import patch
-
-        from tap_coingecko.streams.categories import CoinCategoriesStream
-
-        # Configure multiple tokens
+    def test_asset_profile_get_records_multiple_tokens(self) -> None:
+        """Test that get_records processes all configured tokens."""
         config = get_test_config()
         config["token"] = ["ethereum", "bitcoin", "solana"]
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
 
-        # Create a fresh stream with our custom config
-        categories_stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-
-        # Mock the _process_token method to return dummy records
-        with patch.object(categories_stream, "_process_token") as mock_process:
-            mock_process.side_effect = [
-                [
-                    {
-                        "coin_id": "ethereum",
-                        "name": "Ethereum",
-                        "symbol": "eth",
-                        "categories": ["DeFi"],
-                    }
-                ],
-                [
-                    {
-                        "coin_id": "bitcoin",
-                        "name": "Bitcoin",
-                        "symbol": "btc",
-                        "categories": ["Currency"],
-                    }
-                ],
-                [
-                    {
-                        "coin_id": "solana",
-                        "name": "Solana",
-                        "symbol": "sol",
-                        "categories": ["Smart Contracts"],
-                    }
-                ],
+        # FIX: Combined the two 'with' statements into one line to resolve SIM117.
+        with (
+            patch.object(stream, "get_context_state", return_value={}),
+            patch("singer_sdk.streams.RESTStream.request_records") as mock_request_records,
+        ):
+            mock_request_records.side_effect = [
+                [{"id": "ethereum"}],
+                [{"id": "bitcoin"}],
+                [{"id": "solana"}],
             ]
-
-            # Collect all records
-            records = list(categories_stream.request_records(context=None))
-
-            # Verify all tokens were processed
+            # Collect all records by syncing the whole stream
+            records = list(stream.get_records(context=None))
+            # Verify it was called for each token
+            assert mock_request_records.call_count == 3
             assert len(records) == 3
-            assert mock_process.call_count == 3
 
-            # Verify token names in results
-            coin_ids = [record["coin_id"] for record in records]
-            assert "ethereum" in coin_ids
-            assert "bitcoin" in coin_ids
-            assert "solana" in coin_ids
-
-    def test_categories_request_records_no_tokens(self, tap_instance: TapCoingecko) -> None:
-        """Test request_records with no tokens configured."""
-        from tap_coingecko.streams.categories import CoinCategoriesStream
-
-        # Configure empty token list
+    def test_asset_profile_request_records_no_tokens(self) -> None:
+        """Test get_records with no tokens configured."""
         config = get_test_config()
         config["token"] = []
-
-        # Create stream with empty token list
-        categories_stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-
-        # Should return empty iterator
-        records = list(categories_stream.request_records(context=None))
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
+        records = list(stream.get_records(context=None))
         assert len(records) == 0
 
-    def test_categories_rate_limiting_behavior(self, tap_instance: TapCoingecko) -> None:
-        """Test rate limiting behavior for non-pro API."""
-        from unittest.mock import patch
+    def test_asset_profile_post_process(self, tap_instance: TapCoingecko) -> None:
+        """Test that post_process correctly flattens the API response."""
+        stream = tap_instance.streams["asset_profile"]
+        raw_record = {
+            "id": "ethereum",
+            "market_cap_rank": 2,
+            "market_data": {"roi": {"times": 29.33, "currency": "btc", "percentage": 2933.73}},
+            "community_data": {"telegram_channel_user_count": 12345},
+            "developer_data": {"forks": 19618},
+        }
+        processed = stream.post_process(raw_record, context={})
+        assert processed["market_cap_rank"] == 2
+        assert processed["roi_times"] == 29.33
+        assert processed["developer_forks"] == 19618
+        assert "roi_currency" not in processed
 
-        from tap_coingecko.streams.categories import CoinCategoriesStream
-
-        # Configure non-pro API with wait time
+    def test_asset_profile_404_handling(self) -> None:
+        """Test that a 404 for a token is handled gracefully."""
         config = get_test_config()
-        config["api_url"] = "https://api.coingecko.com/api/v3"
-        config["wait_time_between_requests"] = 2
+        config["token"] = ["non-existent-token", "ethereum"]
+        tap_instance = TapCoingecko(config=config)
+        stream = tap_instance.streams["asset_profile"]
 
-        categories_stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        categories_stream.current_token = "ethereum"
+        http_404_error = requests.exceptions.HTTPError(response=Mock(status_code=404))
 
-        with patch("time.sleep") as mock_sleep:
-            categories_stream._handle_rate_limiting()
-            mock_sleep.assert_called_once_with(2)
+        with patch(
+            "singer_sdk.streams.RESTStream.get_records",
+            side_effect=[http_404_error, [{"id": "ethereum"}]],
+        ) as mock_sync:
+            records = list(stream.get_records(context=None))
 
-        # Test pro API (should not wait)
-        config = get_test_config()
-        config["api_url"] = "https://pro-api.coingecko.com/api/v3"
-        config["wait_time_between_requests"] = 2
-
-        categories_stream = CoinCategoriesStream(tap=TapCoingecko(config=config))
-        categories_stream.current_token = "ethereum"
-
-        with patch("time.sleep") as mock_sleep:
-            categories_stream._handle_rate_limiting()
-            mock_sleep.assert_not_called()
-
-    def test_categories_stream_get_url_params(self, tap_instance: TapCoingecko) -> None:
-        """Test that get_url_params returns empty dict (no pagination)."""
-        categories_stream = tap_instance.streams["coin_categories"]
-
-        params = categories_stream.get_url_params(context=None, next_page_token=None)
-        assert params == {}
-
-        # Should still be empty even with context/token
-        params = categories_stream.get_url_params(
-            context={"token": "ethereum"}, next_page_token="some_token"
-        )
-        assert params == {}
+            assert mock_sync.call_count == 2
+            assert len(records) == 1
+            assert records[0]["id"] == "ethereum"
