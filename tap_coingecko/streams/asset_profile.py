@@ -12,10 +12,11 @@ from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
 
 class AssetProfileStream(RESTStream):
-    """
-    Stream for retrieving a daily snapshot of an asset's core profile.
-    It runs once per day per token to capture unique qualitative, social,
-    developer, and score metrics not available in the historical streams.
+    """Retrieve a daily snapshot of an asset's core profile.
+
+    It runs once per day per token to capture unique qualitative,
+    social, developer, and score metrics not available in the historical
+    streams.
     """
 
     name = "asset_profile"
@@ -52,7 +53,7 @@ class AssetProfileStream(RESTStream):
     def get_url_params(
         self, context: Optional[dict], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
-        """Requests all data panes to ensure we capture every available field."""
+        """Request all data panes to ensure we capture every available field."""
         return {
             "localization": "false",
             "tickers": "false",
@@ -63,9 +64,10 @@ class AssetProfileStream(RESTStream):
         }
 
     def get_records(self, context: Optional[dict]) -> Iterable[Dict[str, Any]]:
-        """
-        Overrides the default `get_records` to implement the once-per-day logic
-        and iterate through the configured tokens.
+        """Override the default `get_records` to implement the once-per-day logic.
+
+        This method iterates through the configured tokens, checking the stream state
+        to see if a sync has already occurred today.
         """
         today_str = pendulum.now("UTC").to_date_string()
 
@@ -91,19 +93,16 @@ class AssetProfileStream(RESTStream):
                     raise FatalAPIError(f"Fatal HTTP error for '{token_id}': {e}") from e
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """
-        Parses the single record from the response.
-        FIX: Added error handling for invalid JSON.
-        """
+        """Parse the single record from the response."""
         try:
             yield response.json()
         except requests.exceptions.JSONDecodeError as e:
             raise FatalAPIError(f"Error decoding JSON from response: {response.text}") from e
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
-        """
-        Transforms the raw API response into a flattened, non-redundant record
-        with all available unique, high-value fields.
+        """Transform the raw API response into a flattened, non-redundant record.
+
+        The new record includes all available unique, high-value fields.
         """
         market_data = row.get("market_data", {}) or {}
         community_data = row.get("community_data", {}) or {}

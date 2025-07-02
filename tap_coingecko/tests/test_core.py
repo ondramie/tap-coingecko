@@ -148,7 +148,8 @@ class TestCustomTapCoingecko:
         assert btc_partition["progress_markers"]["replication_key_value"] == "2025-01-04"
 
     def test_state_per_token_hourly(self, tap_instance: TapCoingecko) -> None:
-        """Test that state is properly managed per token for the hourly stream."""
+        """Test that state is properly managed per token for the hourly
+        stream."""
         # If the hourly stream doesn't exist, warn and skip rather than fail:
         if "token_price_hr" not in tap_instance.streams:
             warnings.warn(
@@ -310,7 +311,8 @@ class TestCustomTapCoingecko:
         assert params == expected_params
 
     def test_asset_profile_http_headers(self) -> None:
-        """Test request headers for different API configurations for asset_profile."""
+        """Test request headers for different API configurations for
+        asset_profile."""
         # Test with Pro API and key
         pro_config = get_test_config()
         pro_config["api_url"] = ApiType.PRO.value

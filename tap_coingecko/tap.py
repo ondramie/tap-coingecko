@@ -80,7 +80,8 @@ class TapCoingecko(Tap):
     def discover_streams(self) -> List[Stream]:
         """Return a list of discovered streams.
 
-        This method generates a separate stream for each token in the config.
+        This method generates a separate stream for each token in the
+        config.
         """
         streams: List[Stream] = [
             CoingeckoDailyStream(tap=self),
