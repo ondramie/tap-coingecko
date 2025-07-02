@@ -12,5 +12,5 @@ __all__ = [
     "CoinListStream",
     "AssetProfileStream",
     "TrendingStream",
-    "DerivativesSentimentStream"
+    "DerivativesSentimentStream",
 ]

@@ -8,8 +8,10 @@ from singer_sdk import typing as th
 from singer_sdk.streams import RESTStream
 from tap_coingecko.streams.utils import API_HEADERS, ApiType
 
+
 class BaseIntelligenceStream(RESTStream):
     """Base class for streams that capture a timestamped snapshot."""
+
     replication_method = "INCREMENTAL"
     replication_key = "snapshot_timestamp"
     is_sorted = False
@@ -24,26 +26,28 @@ class BaseIntelligenceStream(RESTStream):
 
     @property
     def http_headers(self) -> dict:
-        """Return the http headers needed."""
+        """Return the HTTP headers needed for CoinGecko requests."""
         headers = super().http_headers.copy()
         header_key = API_HEADERS.get(self.config["api_url"])
         api_key = self.config.get("api_key")
-        
+
         if self.config["api_url"] == ApiType.PRO.value and not api_key:
-             self.logger.warning(
-                 "API key is not set for the CoinGecko Pro API. "
-                 "This may lead to authentication errors for certain endpoints."
-             )
-        
+            self.logger.warning(
+                "API key is not set for the CoinGecko Pro API. "
+                "This may lead to authentication errors for certain endpoints."
+            )
+
         if header_key and api_key:
             headers[header_key] = api_key
         return headers
 
+
 class TrendingStream(BaseIntelligenceStream):
+    """Stream for retrieving trending coins.
+
+    Captures short-term market focus and is crucial for market intelligence.
     """
-    Stream for retrieving trending coins. Captures short-term market focus
-    and is crucial for marketing intelligence.
-    """
+
     name = "trending"
     path = "/search/trending"
     primary_keys = ["snapshot_timestamp", "coin_id"]
@@ -58,7 +62,7 @@ class TrendingStream(BaseIntelligenceStream):
     ).to_dict()
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Denormalizes the API response to create one row per trending coin."""
+        """Denormalize the API response to create one row per trending coin."""
         snapshot_ts = pendulum.now("UTC").isoformat()
         data = response.json()
         for i, coin_data in enumerate(data.get("coins", [])):
@@ -72,11 +76,13 @@ class TrendingStream(BaseIntelligenceStream):
                 "score": i,
             }
 
+
 class DerivativesSentimentStream(BaseIntelligenceStream):
+    """Stream for retrieving derivatives tickers.
+
+    Captures pro-level sentiment data like funding rates.
     """
-    Stream for retrieving derivatives tickers. Captures pro-level sentiment
-    data like funding rates, giving users a competitive trading edge.
-    """
+
     name = "derivatives_sentiment"
     primary_keys = ["snapshot_timestamp", "market", "symbol"]
     path = "/derivatives"
@@ -93,11 +99,23 @@ class DerivativesSentimentStream(BaseIntelligenceStream):
         th.Property("volume_24h", th.NumberType),
     ).to_dict()
 
-    def get_url_params(self, context: Optional[dict], next_page_token: Optional[Any]) -> Dict[str, Any]:
+    def get_url_params(
+        self, context: Optional[dict], next_page_token: Optional[Any]
+    ) -> Dict[str, Any]:
+        """Return request parameters for the API call."""
         # 'unexpired' is more efficient as it excludes settled contracts.
         return {"include_tickers": "unexpired"}
 
     def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
-        """Injects the ingestion timestamp into each derivatives record."""
-        row["snapshot_timestamp"] = pendulum.now("UTC").isoformat()
-        return row
+        """Inject the ingestion timestamp and filter relevant fields."""
+        return {
+            "snapshot_timestamp": pendulum.now("UTC").isoformat(),
+            "market": row.get("market"),
+            "symbol": row.get("symbol"),
+            "price": row.get("price"),
+            "price_percentage_change_24h": row.get("price_percentage_change_24h"),
+            "contract_type": row.get("contract_type"),
+            "funding_rate": row.get("funding_rate"),
+            "open_interest": row.get("open_interest"),
+            "volume_24h": row.get("volume_24h"),
+        }

@@ -16,7 +16,6 @@ from singer_sdk.testing import get_tap_test_class
 from singer_sdk.testing.config import SuiteConfig
 
 from tap_coingecko.streams.asset_profile import AssetProfileStream
-from tap_coingecko.streams.market_intelligence import TrendingStream, DerivativesSentimentStream
 from tap_coingecko.streams.utils import ApiType
 from tap_coingecko.tap import TapCoingecko
 
@@ -242,6 +241,9 @@ class TestCustomTapCoingecko:
         print(f"Headers: {prepared_request.headers}")
         print(f"Method: {prepared_request.method}")
 
+    @pytest.mark.skipif(
+        not os.getenv("TAP_COINGECKO_API_KEY"), reason="TAP_COINGECKO_API_KEY not set"
+    )
     def test_live_api_response_processing(self, tap_instance: TapCoingecko) -> None:
         """Test processing of live API response."""
         if "coingecko_token" not in tap_instance.streams:
@@ -428,7 +430,7 @@ class TestCustomTapCoingecko:
             assert mock_sync.call_count == 2
             assert len(records) == 1
             assert records[0]["id"] == "ethereum"
-    
+
     def test_trending_stream_configuration(self, tap_instance: TapCoingecko) -> None:
         """Test the configuration of the TrendingStream."""
         assert "trending" in tap_instance.streams
@@ -467,11 +469,14 @@ class TestCustomTapCoingecko:
         """Test post-processing for the derivatives stream."""
         stream = tap_instance.streams["derivatives_sentiment"]
         raw_record = {
-            "market": "Binance", "symbol": "BTC-PERP", "funding_rate": 0.0001,
-            "price_percentage_change_24h": 1.5 
+            "market": "Binance",
+            "symbol": "BTC-PERP",
+            "funding_rate": 0.0001,
+            "price_percentage_change_24h": 1.5,
+            "an_extra_field_from_api": "should be removed",
         }
         processed = stream.post_process(raw_record)
         assert processed["market"] == "Binance"
         assert processed["funding_rate"] == 0.0001
         assert "snapshot_timestamp" in processed
-        assert "price_percentage_change_24h" not in processed
+        assert "an_extra_field_from_api" not in processed

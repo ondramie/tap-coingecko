@@ -90,6 +90,6 @@ class TapCoingecko(Tap):
             CoinListStream(tap=self),
             AssetProfileStream(tap=self),
             TrendingStream(tap=self),
-            DerivativesSentimentStream(tap=self)
+            DerivativesSentimentStream(tap=self),
         ]
         return streams
