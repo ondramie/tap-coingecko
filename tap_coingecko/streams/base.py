@@ -1,7 +1,7 @@
 """Module for CoinGecko Stream.
 
-This module implements an incremental REST stream to fetch daily
-historical cryptocurrency data.
+This module implements an incremental REST stream
+to fetch daily historical cryptocurrency data.
 """
 
 import copy
@@ -23,8 +23,8 @@ from tap_coingecko.streams.utils import API_HEADERS, ApiType
 class CoingeckoDailyStream(RESTStream):
     """RESTStream for fetching daily historical CoinGecko token data.
 
-    This class implements incremental replication for historical
-    cryptocurrency data from the CoinGecko API.
+    This class implements incremental replication for historical cryptocurrency
+    data from the CoinGecko API.
     """
 
     name = "coingecko_token"
@@ -36,13 +36,11 @@ class CoingeckoDailyStream(RESTStream):
 
     @property
     def state_partitioning_key_values(self) -> dict[str, list[Any]]:
-        """Return a dictionary of partition key names and their possible
-        values."""
+        """Return a dictionary of partition key names and their possible values."""
         return {"token": self.config["token"]}
 
     def get_replication_key_signpost(self, context: types.Context | None) -> datetime | Any | None:
-        """Return the signpost value for the replication key (yesterday's
-        date).
+        """Return the signpost value for the replication key (yesterday's date).
 
         Overrides the default method to return yesterday's date in UTC.
 
@@ -55,6 +53,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         datetime | Any | None
             Max allowable bookmark value for this stream's replication key.
+
         """
         return pendulum.yesterday(tz="UTC")
 
@@ -65,6 +64,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         Optional[Mapping[str, Any]]
             Mapping of concurrency parameters for the Pro API, or None for the free API.
+
         """
         match self.config["api_url"]:
             case ApiType.PRO.value:
@@ -83,6 +83,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         Dict[str, str]
             A dictionary containing headers to authenticate requests.
+
         """
         header_key = API_HEADERS.get(self.config["api_url"])
         if header_key and self.config.get("api_key"):
@@ -97,6 +98,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         str
             The base URL.
+
         """
         match self.config["api_url"]:
             case ApiType.PRO.value:
@@ -114,6 +116,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         str
             The API endpoint path.
+
         """
         if not hasattr(self, "current_token"):
             raise ValueError("No token has been set for the stream.")
@@ -131,6 +134,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         Callable
             A callable with retry capabilities.
+
         """
         return backoff.on_exception(
             backoff.expo,
@@ -151,6 +155,7 @@ class CoingeckoDailyStream(RESTStream):
         ------
         dict
             Individual token records.
+
         """
         self.logger.info(f"Starting request_records with tokens: {self.config['token']}")
         for token in self.config["token"]:
@@ -172,6 +177,7 @@ class CoingeckoDailyStream(RESTStream):
         ------
         dict
             Parsed response records for the given token.
+
         """
         self.logger.info(f"Fetching token for context: {self.context}")
         next_page_token = self.get_next_page_token(None, None, context)
@@ -244,6 +250,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         Dict[str, Any]
             The updated state dictionary.
+
         """
         current_stream_state = current_stream_state or {"bookmarks": {}}
         token = latest_record["token"]
@@ -269,8 +276,7 @@ class CoingeckoDailyStream(RESTStream):
         previous_token: Optional[Any],
         context: Optional[Mapping[str, Any]],
     ) -> Optional[datetime]:
-        """Return the next date token for pagination, or None if we've reached
-        the signpost date."""
+        """Return the next date token for pagination, or None if we've reached the signpost date."""
         self.logger.debug(f"Getting next page token with previous_token={previous_token}")
         old_token = previous_token or self.get_starting_replication_key_value(context)
         self.logger.debug(f"old_token after resolution: {old_token}")
@@ -315,6 +321,7 @@ class CoingeckoDailyStream(RESTStream):
         -------
         Dict[str, Any]
             A dictionary of URL parameters.
+
         """
         if next_page_token is None:
             return {"localization": "false"}
@@ -341,6 +348,7 @@ class CoingeckoDailyStream(RESTStream):
         ------
         dict
             Parsed response records.
+
         """
         if self._current_page_token is None:
             raise ValueError("next_page_token cannot be None during parsing.")

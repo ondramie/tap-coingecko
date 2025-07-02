@@ -1,7 +1,7 @@
 """Module for CoinGecko Hourly Stream.
 
-This module implements an incremental REST stream to fetch hourly
-historical cryptocurrency data.
+This module implements an incremental REST stream
+to fetch hourly historical cryptocurrency data.
 """
 
 import os
@@ -19,9 +19,9 @@ from tap_coingecko.streams.utils import API_HEADERS, ApiType
 class CoingeckoHourlyStream(RESTStream):
     """RESTStream for fetching hourly historical CoinGecko token data.
 
-    This class implements incremental replication for hourly
-    cryptocurrency data from the CoinGecko API. Note that hourly data is
-    only available for Enterprise plan subscribers.
+    This class implements incremental replication for hourly cryptocurrency
+    data from the CoinGecko API. Note that hourly data is only available for
+    Enterprise plan subscribers.
     """
 
     name = "token_price_hr"  # Single stream name for all tokens
@@ -38,6 +38,7 @@ class CoingeckoHourlyStream(RESTStream):
         -------
         dict
             A dictionary containing headers to authenticate requests.
+
         """
         header_key = API_HEADERS.get(self.config["api_url"])
         if header_key and self.config.get("api_key"):
@@ -101,8 +102,7 @@ class CoingeckoHourlyStream(RESTStream):
         self,
         context: types.Context | None,
     ) -> int:
-        """Return the signpost value for the replication key (current time in
-        millisecond epoch)."""
+        """Return the signpost value for the replication key (current time in millisecond epoch)."""
         return int(pendulum.now(tz="UTC").timestamp() * 1000)
 
     def get_url_params(
