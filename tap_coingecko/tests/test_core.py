@@ -480,3 +480,50 @@ class TestCustomTapCoingecko:
         assert processed["funding_rate"] == 0.0001
         assert "snapshot_timestamp" in processed
         assert "an_extra_field_from_api" not in processed
+
+    def test_newly_listed_stream_configuration(self, tap_instance: TapCoingecko) -> None:
+        """Test the configuration of the NewlyListedStream."""
+        assert "newly_listed" in tap_instance.streams
+        stream = tap_instance.streams["newly_listed"]
+        assert stream.name == "newly_listed"
+        assert stream.path == "/coins/list/new"
+        assert stream.primary_keys == ["snapshot_timestamp", "id"]
+
+    def test_newly_listed_post_process(self, tap_instance: TapCoingecko) -> None:
+        """Test the post-processing logic for the NewlyListedStream."""
+        stream = tap_instance.streams["newly_listed"]
+        # Example timestamp from the API response you provided
+        raw_record = {"id": "test-coin", "activated_at": 1750962433}
+        processed = stream.post_process(raw_record)
+
+        assert "snapshot_timestamp" in processed
+        assert isinstance(processed["activated_at"], pendulum.DateTime)
+
+        assert processed["activated_at"].year == 2025
+
+    def test_top_movers_stream_configuration(self, tap_instance: TapCoingecko) -> None:
+        """Test the configuration of the TopMoversStream."""
+        assert "top_movers" in tap_instance.streams
+        stream = tap_instance.streams["top_movers"]
+        assert stream.name == "top_movers"
+        assert stream.path == "/coins/top_gainers_losers"
+        assert stream.primary_keys == ["snapshot_timestamp", "id", "type"]
+
+    def test_top_movers_parse_response(self, tap_instance: TapCoingecko) -> None:
+        """Test that TopMoversStream correctly parses and separates gainers/losers."""
+        stream = tap_instance.streams["top_movers"]
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "top_gainers": [{"id": "gainer1", "name": "Gainer Coin"}],
+            "top_losers": [{"id": "loser1", "name": "Loser Coin"}],
+        }
+        records = list(stream.parse_response(mock_response))
+
+        assert len(records) == 2
+
+        gainer_record = next(r for r in records if r["type"] == "gainer")
+        loser_record = next(r for r in records if r["type"] == "loser")
+
+        assert gainer_record["id"] == "gainer1"
+        assert loser_record["id"] == "loser1"
+        assert "snapshot_timestamp" in gainer_record
