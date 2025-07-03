@@ -1,6 +1,6 @@
 """Stream for extracting a daily snapshot of comprehensive coin profile data."""
 
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Mapping
 
 import pendulum
 import requests
@@ -51,7 +51,7 @@ class AssetProfileStream(RESTStream):
         return headers
 
     def get_url_params(
-        self, context: Optional[dict], next_page_token: Optional[Any]
+        self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
         """Request all data panes to ensure we capture every available field."""
         return {
@@ -63,7 +63,7 @@ class AssetProfileStream(RESTStream):
             "sparkline": "false",
         }
 
-    def get_records(self, context: Optional[dict]) -> Iterable[Dict[str, Any]]:
+    def get_records(self, context: Optional[Mapping[str, Any]]) -> Iterable[Dict[str, Any]]:
         """Override the default `get_records` to implement the once-per-day logic.
 
         This method iterates through the configured tokens, checking the stream state
@@ -85,7 +85,10 @@ class AssetProfileStream(RESTStream):
 
             self.logger.info(f"Fetching daily profile snapshot for '{token_id}'.")
             try:
-                yield from super().get_records(token_context)
+                # We need to merge the token_context with the parent context
+                # The parent context can be None, so handle that case
+                full_context = {**(context or {}), **token_context}
+                yield from super().get_records(full_context)
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 404:
                     self.logger.warning(f"Token '{token_id}' not found on CoinGecko. Skipping.")
@@ -99,7 +102,7 @@ class AssetProfileStream(RESTStream):
         except requests.exceptions.JSONDecodeError as e:
             raise FatalAPIError(f"Error decoding JSON from response: {response.text}") from e
 
-    def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
+    def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
         """Transform the raw API response into a flattened, non-redundant record.
 
         The new record includes all available unique, high-value fields.

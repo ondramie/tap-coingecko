@@ -1,6 +1,6 @@
 """Streams for unique, non-overlapping market intelligence data."""
 
-from typing import Iterable, Dict, Optional, Any
+from typing import Iterable, Dict, Optional, Any, Mapping
 import pendulum
 import requests
 
@@ -100,13 +100,13 @@ class DerivativesSentimentStream(BaseIntelligenceStream):
     ).to_dict()
 
     def get_url_params(
-        self, context: Optional[dict], next_page_token: Optional[Any]
+        self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
         """Return request parameters for the API call."""
         # 'unexpired' is more efficient as it excludes settled contracts.
         return {"include_tickers": "unexpired"}
 
-    def post_process(self, row: dict, context: Optional[dict] = None) -> dict:
+    def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:
         """Inject the ingestion timestamp and filter relevant fields."""
         return {
             "snapshot_timestamp": pendulum.now("UTC").isoformat(),
