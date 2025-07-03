@@ -103,7 +103,6 @@ class DerivativesSentimentStream(BaseIntelligenceStream):
         self, context: Optional[Mapping[str, Any]], next_page_token: Optional[Any]
     ) -> Dict[str, Any]:
         """Return request parameters for the API call."""
-        # 'unexpired' is more efficient as it excludes settled contracts.
         return {"include_tickers": "unexpired"}
 
     def post_process(self, row: dict, context: Optional[Mapping[str, Any]] = None) -> dict:

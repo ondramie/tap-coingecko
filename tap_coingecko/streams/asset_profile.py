@@ -85,8 +85,6 @@ class AssetProfileStream(RESTStream):
 
             self.logger.info(f"Fetching daily profile snapshot for '{token_id}'.")
             try:
-                # We need to merge the token_context with the parent context
-                # The parent context can be None, so handle that case
                 full_context = {**(context or {}), **token_context}
                 yield from super().get_records(full_context)
             except requests.exceptions.HTTPError as e:
