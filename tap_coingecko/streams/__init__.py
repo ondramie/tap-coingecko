@@ -5,6 +5,7 @@ from tap_coingecko.streams.base import CoingeckoDailyStream
 from tap_coingecko.streams.coins_list import CoinListStream
 from tap_coingecko.streams.hourly import CoingeckoHourlyStream
 from tap_coingecko.streams.market_intelligence import TrendingStream, DerivativesSentimentStream
+from tap_coingecko.streams.discovery import NewlyListedStream, TopMoversStream
 
 __all__ = [
     "CoingeckoDailyStream",
@@ -13,4 +14,6 @@ __all__ = [
     "AssetProfileStream",
     "TrendingStream",
     "DerivativesSentimentStream",
+    "NewlyListedStream",
+    "TopMoversStream",
 ]
