@@ -241,6 +241,9 @@ class TestCustomTapCoingecko:
         print(f"Headers: {prepared_request.headers}")
         print(f"Method: {prepared_request.method}")
 
+    @pytest.mark.skipif(
+        not os.getenv("TAP_COINGECKO_API_KEY"), reason="TAP_COINGECKO_API_KEY not set"
+    )
     def test_live_api_response_processing(self, tap_instance: TapCoingecko) -> None:
         """Test processing of live API response."""
         if "coingecko_token" not in tap_instance.streams:
@@ -380,9 +383,7 @@ class TestCustomTapCoingecko:
                 [{"id": "bitcoin"}],
                 [{"id": "solana"}],
             ]
-            # Collect all records by syncing the whole stream
             records = list(stream.get_records(context=None))
-            # Verify it was called for each token
             assert mock_request_records.call_count == 3
             assert len(records) == 3
 
@@ -429,3 +430,53 @@ class TestCustomTapCoingecko:
             assert mock_sync.call_count == 2
             assert len(records) == 1
             assert records[0]["id"] == "ethereum"
+
+    def test_trending_stream_configuration(self, tap_instance: TapCoingecko) -> None:
+        """Test the configuration of the TrendingStream."""
+        assert "trending" in tap_instance.streams
+        stream = tap_instance.streams["trending"]
+        assert stream.name == "trending"
+        assert stream.path == "/search/trending"
+        assert stream.replication_method == "INCREMENTAL"
+
+    def test_trending_parse_response(self, tap_instance: TapCoingecko) -> None:
+        """Test that TrendingStream correctly denormalizes its response."""
+        stream = tap_instance.streams["trending"]
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "coins": [{"item": {"id": "test1"}}, {"item": {"id": "test2"}}]
+        }
+        records = list(stream.parse_response(mock_response))
+        assert len(records) == 2
+        assert records[0]["coin_id"] == "test1"
+        assert "snapshot_timestamp" in records[0]
+
+    def test_derivatives_stream_configuration(self, tap_instance: TapCoingecko) -> None:
+        """Test the configuration of the DerivativesSentimentStream."""
+        assert "derivatives_sentiment" in tap_instance.streams
+        stream = tap_instance.streams["derivatives_sentiment"]
+        assert stream.name == "derivatives_sentiment"
+        assert stream.path == "/derivatives"
+        assert stream.primary_keys == ["snapshot_timestamp", "market", "symbol"]
+
+    def test_derivatives_get_url_params(self, tap_instance: TapCoingecko) -> None:
+        """Test URL params for the derivatives stream."""
+        stream = tap_instance.streams["derivatives_sentiment"]
+        params = stream.get_url_params(context=None, next_page_token=None)
+        assert params == {"include_tickers": "unexpired"}
+
+    def test_derivatives_post_process(self, tap_instance: TapCoingecko) -> None:
+        """Test post-processing for the derivatives stream."""
+        stream = tap_instance.streams["derivatives_sentiment"]
+        raw_record = {
+            "market": "Binance",
+            "symbol": "BTC-PERP",
+            "funding_rate": 0.0001,
+            "price_percentage_change_24h": 1.5,
+            "an_extra_field_from_api": "should be removed",
+        }
+        processed = stream.post_process(raw_record)
+        assert processed["market"] == "Binance"
+        assert processed["funding_rate"] == 0.0001
+        assert "snapshot_timestamp" in processed
+        assert "an_extra_field_from_api" not in processed
