@@ -70,10 +70,7 @@ class NewlyListedStream(BaseDiscoveryStream):
 
 
 class TopMoversStream(BaseDiscoveryStream):
-    """Stream for retrieving the top 30 coins with the largest price gain and loss.
-
-    Note: This is an exclusive endpoint for paid plan subscribers.
-    """
+    """Stream for retrieving the top 30 coins with the largest price gain and loss."""
 
     name = "top_movers"
     path = "/coins/top_gainers_losers"
